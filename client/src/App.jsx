@@ -1,0 +1,512 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import api from "./api";
+import { STATUS, useLocalBook } from "./useLocalBook";
+import * as storage from "./storage";
+import PdfReader from "./PdfReader";
+import Heatmap from "./Heatmap";
+import PageHeatmap from "./PageHeatmap";
+import TocTable from "./TocTable";
+import ChapterProgress from "./ChapterProgress";
+import BookWizard from "./BookWizard";
+
+const STATUS_LABEL = {
+  [STATUS.READY]: "✔ connected",
+  [STATUS.MISSING]: "✖ file missing",
+  [STATUS.PERMISSION]: "◔ needs permission",
+  [STATUS.ERROR]: "⛔ error",
+  [STATUS.LOADING]: "… checking",
+};
+
+function statusForMeta(s) {
+  return s?.status || STATUS.IDLE;
+}
+
+function fmtClock(totalSeconds) {
+  totalSeconds = Math.floor(totalSeconds || 0);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(Math.floor(totalSeconds / 3600))}:${pad(Math.floor((totalSeconds % 3600) / 60))}:${pad(totalSeconds % 60)}`;
+}
+
+export default function App() {
+  const { saved, active, pick, reconnect, stopTracking, forget, removeStats, close, beginReading, persistSavedMeta, supportsFileSystem } = useLocalBook();
+  const [commits, setCommits] = useState([]);
+  const [commitsLoading, setCommitsLoading] = useState(false);
+  const [meta, setMeta] = useState(null);
+  const [metaBase, setMetaBase] = useState(null);
+  const [toc, setToc] = useState([]);
+  const [tocDirty, setTocDirty] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [selectedDay, setSelectedDay] = useState(null);
+  const [pageCount, setPageCount] = useState(null);
+  const [panel, setPanel] = useState(null);
+  const [drawerLeaving, setDrawerLeaving] = useState(false);
+  const drawerTimerRef = useRef(null);
+  const [pausedSession, setPausedSession] = useState(null);
+  const [thumbs, setThumbs] = useState({});
+  const [thumbData, setThumbData] = useState(null);
+  const activeBookIdRef = useRef(null);
+  const readerRef = useRef(null);
+
+  useEffect(() => {
+    storage
+      .getThumbnails()
+      .then((list) => {
+        const m = {};
+        for (const t of list) if (t?.bookId) m[t.bookId] = t.dataUrl;
+        setThumbs(m);
+      })
+      .catch(() => {});
+  }, []);
+
+  const visibleCommits = useMemo(
+    () => (selectedDay ? commits.filter((c) => String(c.started_at || "").startsWith(selectedDay)) : commits),
+    [commits, selectedDay]
+  );
+
+  const loadCommits = useCallback(async (bookId) => {
+    if (!bookId) return;
+    setCommitsLoading(true);
+    try {
+      setCommits(await api.getCommits(bookId));
+    } catch (err) {
+      setNotice(`Couldn't load commit history: ${err.message}`);
+    } finally {
+      setCommitsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (active.book?.id) {
+      activeBookIdRef.current = active.book.id;
+      setMeta({ title: active.book.title, author: active.book.author, edition: active.book.edition });
+      setMetaBase({ title: active.book.title, author: active.book.author, edition: active.book.edition });
+      setToc(Array.isArray(active.book.toc) ? active.book.toc : []);
+      setTocDirty(false);
+      setPageCount(null);
+      setSelectedDay(null);
+      clearTimeout(drawerTimerRef.current);
+      setDrawerLeaving(false);
+      setPanel(null);
+      setThumbData(null);
+      loadCommits(active.book.id);
+    } else {
+      activeBookIdRef.current = null;
+    }
+  }, [active.book?.id, loadCommits]);
+
+  const flushQueue = useCallback(async () => {
+    const queued = await storage.listQueuedCommits();
+    for (const q of queued) {
+      try {
+        await api.pushCommit(q.bookId, q);
+        await storage.removeQueuedCommit(q.sessionId);
+      } catch {
+        break;
+      }
+    }
+    const currentBookId = activeBookIdRef.current;
+    if (currentBookId) loadCommits(currentBookId);
+  }, [loadCommits]);
+
+  useEffect(() => {
+    flushQueue();
+    const onOnline = () => flushQueue();
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [flushQueue]);
+
+  const handleSessionEnd = useCallback(
+    async (payload) => {
+      const bookId = activeBookIdRef.current;
+      if (!bookId) {
+        setNotice("Session skipped — book isn't registered with the server yet. Add/register the book first.");
+        return;
+      }
+      await storage.enqueueCommit({ ...payload, bookId });
+      await flushQueue();
+    },
+    [flushQueue]
+  );
+
+  const openPanel = useCallback((p) => {
+    clearTimeout(drawerTimerRef.current);
+    setDrawerLeaving(false);
+    setPanel(p);
+  }, []);
+
+  const closePanel = useCallback(() => {
+    clearTimeout(drawerTimerRef.current);
+    setDrawerLeaving(true);
+    drawerTimerRef.current = setTimeout(() => {
+      setPanel(null);
+      setDrawerLeaving(false);
+    }, 210);
+  }, []);
+
+  const saveMeta = async (patch) => {
+    const clientId = active.bookId;
+    const serverId = active.book?.id;
+
+    if (!clientId || !serverId) return;
+    try {
+      const updated = await api.updateBook(serverId, { ...meta, ...patch, toc });
+      setMeta({ title: updated.title, author: updated.author, edition: updated.edition });
+      setMetaBase({ title: updated.title, author: updated.author, edition: updated.edition });
+      setToc(updated.toc);
+      setTocDirty(false);
+      persistSavedMeta(clientId, { title: updated.title, author: updated.author, edition: updated.edition });
+    } catch (err) {
+      setNotice(`Save failed: ${err.message}`);
+    }
+  };
+
+  const addChapter = () => {
+    setToc((t) => [...t, { title: "New chapter", startPage: 1 }]);
+    setTocDirty(true);
+  };
+  const insertChapter = (i) => {
+    setToc((t) => {
+      const start = t[i] ? Number(t[i].startPage) || 1 : t.length ? Number(t[t.length - 1].startPage) || 1 : 1;
+      return [...t.slice(0, i), { title: "New chapter", startPage: start }, ...t.slice(i)];
+    });
+    setTocDirty(true);
+  };
+  const importOutline = async () => {
+    try {
+      const rows = await readerRef.current?.getOutline?.();
+      if (!rows || rows.length === 0) {
+        setNotice("No embedded outline found in this PDF.");
+        return;
+      }
+      setToc(rows.map(({ title, startPage }) => ({ title, startPage })));
+      setTocDirty(true);
+      setNotice(`Imported ${rows.length} entries from the PDF outline. Review, edit, then Save TOC.`);
+    } catch (err) {
+      setNotice(`Couldn't import outline: ${err.message}`);
+    }
+  };
+  const updateChapter = (i, patch) => {
+    setToc((t) => t.map((c, j) => (j === i ? { ...c, ...patch } : c)));
+    setTocDirty(true);
+  };
+  const removeChapter = (i) => {
+    setToc((t) => t.filter((_, j) => j !== i));
+    setTocDirty(true);
+  };
+
+  const chapterRows = useMemo(() => {
+    const visited = new Set();
+    for (const c of commits) {
+      const readPages = typeof c.read_pages === "string" ? JSON.parse(c.read_pages) : c.read_pages || [];
+      for (const p of readPages) if (Number.isFinite(Number(p))) visited.add(Number(p));
+    }
+    const pc = pageCount ?? active.book?.page_count ?? null;
+    return toc.map((c, i) => {
+      const start = Number(c.startPage) || 1;
+      const nextStart = toc[i + 1] ? Number(toc[i + 1].startPage) || 1 : null;
+      const end = nextStart != null ? nextStart - 1 : pc != null ? pc : null;
+      let span = 0;
+      let vis = 0;
+      if (end != null && end >= start) {
+        span = end - start + 1;
+        for (let p = start; p <= end; p++) if (visited.has(p)) vis++;
+      }
+      return { ...c, startPage: start, span, visited: vis };
+    });
+  }, [commits, toc, pageCount, active.book?.page_count]);
+
+  const bookOpen = active.bookId != null;
+  const readerOpen = active.status === STATUS.READY && active.file;
+  const showLibrary = !bookOpen || active.status === STATUS.WIZARD;
+
+  useEffect(() => {
+    let alive = true;
+    storage
+      .getPendingSession()
+      .then((s) => {
+        if (alive) setPausedSession(s && s.paused && s.bookKey ? s : null);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [bookOpen]);
+
+  const pausedSeconds = pausedSession ? Object.values(pausedSession.secondsPerPage || {}).reduce((a, b) => a + b, 0) : 0;
+  const metaDirty =
+    (meta?.title ?? "") !== (metaBase?.title ?? "") ||
+    (meta?.author ?? "") !== (metaBase?.author ?? "") ||
+    Number(meta?.edition ?? null) !== Number(metaBase?.edition ?? null);
+  const bookTitle =
+    meta?.title || active.book?.title || (storage.loadSavedMeta()[active.bookId] || {}).title || "Book";
+
+  const handleWizardSave = async () => {
+    const bookId = active.bookId;
+    if (!bookId) return;
+    await saveMeta({});
+    if (thumbData) {
+      try {
+        await storage.saveThumbnail(bookId, thumbData);
+        setThumbs((m) => ({ ...m, [bookId]: thumbData }));
+      } catch {
+        console.error("thumbnail save failed");
+      }
+    }
+    beginReading();
+  };
+
+  const openBook = (s) => {
+    if (statusForMeta(s) === STATUS.MISSING) pick(s.bookId);
+    else reconnect(s.bookId);
+  };
+
+  return (
+    <div className="app">
+      {notice && (
+        <div className="notice" onClick={() => setNotice("")}>
+          {notice}
+        </div>
+      )}
+
+      {showLibrary ? (
+        <section className="library">
+          <header className="library-top">
+            <div>
+              <h1>📚 BookTrack</h1>
+              <span className="tagline">git-style reading progress for technical books</span>
+            </div>
+            <button className="primary" onClick={() => pick()} disabled={active.status === STATUS.WIZARD}>+ Add a book</button>
+          </header>
+          {supportsFileSystem === false && (
+            <p className="hint">Your browser lacks the File System Access API — use Chrome/Edge/Safari.</p>
+          )}
+          {saved.length === 0 && (
+            <p className="hint">No books attached yet. Pick a local PDF — the file never leaves your device.</p>
+          )}
+          <ul className="book-list library-list">
+            {saved.map((s) => (
+              <li key={s.bookId} className="book-item library-item" onClick={() => openBook(s)}>
+                {thumbs[s.bookId] && (
+                  <img className="book-thumb" src={thumbs[s.bookId]} alt="" />
+                )}
+                <div className="book-item-body">
+                <div className="book-item-main">
+                  <strong className="book-title">{s.meta?.title || "Book"}</strong>
+                  <div className="book-item-tags">
+                    <span className={`status status-${statusForMeta(s)}`}>{STATUS_LABEL[statusForMeta(s)] || "idle"}</span>
+                    {pausedSession?.bookKey === s.meta?.fingerprint && (
+                      <span className="paused-badge">⏸ paused · {fmtClock(pausedSeconds)}</span>
+                    )}
+                  </div>
+                </div>
+                <div className="book-item-actions">
+                  {statusForMeta(s) === STATUS.MISSING ? (
+                    <button onClick={(e) => { e.stopPropagation(); pick(s.bookId); }}>Locate file</button>
+                  ) : statusForMeta(s) === STATUS.PERMISSION || statusForMeta(s) === STATUS.ERROR ? (
+                    <button onClick={(e) => { e.stopPropagation(); reconnect(s.bookId); }}>Reconnect</button>
+                  ) : (
+                    <button className="primary" onClick={(e) => { e.stopPropagation(); reconnect(s.bookId); }}>Open</button>
+                  )}
+                </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : (
+        <div className="viewer-scene">
+          <div className="reader-top" id="reader-toolbar-slot" />
+          <div className="viewer-main">
+          {readerOpen ? (
+            <PdfReader
+              ref={readerRef}
+              file={active.file}
+              book={{ ...active.book, toc }}
+              onSessionEnd={handleSessionEnd}
+              onPagesKnown={setPageCount}
+              onClose={close}
+            />
+          ) : (
+            <div className="reader error-backdrop">
+              {active.status === STATUS.MISSING && (
+                <div className="empty-state">
+                  <h3>The book file is missing</h3>
+                  <p>The file you connected was moved or renamed. Locate the new path to continue tracking.</p>
+                  <button className="primary" onClick={() => pick(active.bookId)}>Locate file…</button>
+                </div>
+              )}
+              {active.status === STATUS.PERMISSION && (
+                <div className="empty-state">
+                  <h3>Reading permission required</h3>
+                  <button className="primary" onClick={() => reconnect(active.bookId)}>Reconnect</button>
+                </div>
+              )}
+              {active.status === STATUS.UNSUPPORTED && (
+                <div className="empty-state">
+                  <h3>Browser not supported</h3>
+                  <p>{active.error}</p>
+                </div>
+              )}
+              {active.status === STATUS.ERROR && (
+                <div className="empty-state">
+                  <h3>Something went wrong</h3>
+                  <p>{active.error}</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {panel && (
+            <aside className={`drawer${drawerLeaving ? " drawer-leaving" : ""}`}>
+              {panel === "info" ? (
+                <>
+                <div className="drawer-header">
+                  <strong>Reading activity</strong>
+                  <button onClick={closePanel}>✕</button>
+                </div>
+                <div className="drawer-body">
+                  <div className="book-overview">
+                    <div className="meta-line"><span>Title</span><b>{meta?.title || "—"}</b></div>
+                    <div className="meta-line"><span>Author</span><b>{meta?.author || "—"}</b></div>
+                    <div className="meta-line"><span>Edition</span><b>{meta?.edition ?? "—"}</b></div>
+                    <div className="meta-line"><span>Fingerprint</span><b className="fprint">{active.book?.fingerprint?.slice(0, 16) || "—"}…</b></div>
+                  </div>
+                  {commitsLoading ? (
+                    <p className="muted">Loading…</p>
+                  ) : (
+                    <div className="activity-block">
+                      <Heatmap commits={commits} onSelectDay={setSelectedDay} selectedDay={selectedDay} />
+                    </div>
+                  )}
+                  <div className="activity-block">
+                    <PageHeatmap pageCount={pageCount ?? active.book?.page_count ?? null} commits={visibleCommits} />
+                  </div>
+                  <div className="activity-block">
+                    <ChapterProgress rows={chapterRows} />
+                  </div>
+                </div>
+                </>
+              ) : (
+                <>
+                <div className="drawer-header">
+                  <strong>Book settings</strong>
+                  <button onClick={closePanel}>✕</button>
+                </div>
+                <div className="drawer-body">
+                  <section className="panel settings-section">
+                    <h2>Book metadata</h2>
+                    <div className="meta-grid">
+                      <label>Title
+                        <input value={meta?.title || ""} onChange={(e) => setMeta((m) => ({ ...m, title: e.target.value }))} />
+                      </label>
+                      <label>Author
+                        <input value={meta?.author || ""} onChange={(e) => setMeta((m) => ({ ...m, author: e.target.value }))} />
+                      </label>
+                      <label>Edition
+                        <input type="number" min={1} value={meta?.edition ?? ""} onChange={(e) => setMeta((m) => ({ ...m, edition: Number(e.target.value) }))} />
+                      </label>
+                    </div>
+                    <div className="meta-actions">
+                      <button onClick={() => saveMeta({})} disabled={!metaDirty}>
+                        Save
+                      </button>
+                    </div>
+                  </section>
+
+                  <section className="panel settings-section toc-panel">
+                    <h2>Table of contents <span className="muted">(edit chapter start pages)</span></h2>
+                    <TocTable
+                      rows={chapterRows}
+                      onChange={updateChapter}
+                      onRemove={removeChapter}
+                      onAdd={addChapter}
+                      onInsert={insertChapter}
+                    />
+                    <div className="meta-actions">
+                      <button onClick={importOutline}>Import from PDF outline</button>
+                      {tocDirty && <button onClick={() => saveMeta({})}>Save TOC</button>}
+                    </div>
+                  </section>
+
+                  <section className="panel settings-section danger-zone">
+                    <h2>Danger zone</h2>
+                    <div className="danger-row">
+                      <span>Remove Book — detach this file; stats stay on the server.</span>
+                      <button className="danger" onClick={() => stopTracking(active.bookId)}>Remove Book</button>
+                    </div>
+                    <div className="danger-row">
+                      <span>Remove Stats — delete all reading progress for this book.</span>
+                      <button
+                        className="danger"
+                        onClick={() => {
+                          if (window.confirm("Remove all stats for this book? The book itself stays.")) {
+                            readerRef.current?.resetSession();
+                            removeStats(active.bookId).then(() => {
+                              const sid = (storage.loadSavedMeta()[active.bookId] || {}).serverId;
+                              if (sid) loadCommits(sid);
+                            });
+                          }
+                        }}
+                      >Remove Stats</button>
+                    </div>
+                    <div className="danger-row">
+                      <span>Forget Book — permanently delete the book and all progress.</span>
+                      <button
+                        className="danger"
+                        onClick={() => {
+                          if (window.confirm("Forget this book? Its stats, commits, and local data will be permanently deleted.")) {
+                            forget(active.bookId);
+                          }
+                        }}
+                      >Forget Book</button>
+                    </div>
+                  </section>
+                </div>
+                </>
+              )}
+            </aside>
+          )}
+          </div>
+
+          <div className="viewer-top">
+            <button className="ghost" onClick={() => { readerRef.current?.pause(); close(); }}>← Library</button>
+            <strong className="viewer-title" title={bookTitle}>
+              {bookTitle}
+              {meta?.author ? <span className="viewer-author"> — {meta.author}</span> : null}
+            </strong>
+            <div className="viewer-top-actions">
+              <button className={panel === "info" ? "active" : ""} onClick={() => (panel === "info" ? closePanel() : openPanel("info"))}>
+                Activity
+              </button>
+              <button className={panel === "settings" ? "active" : ""} onClick={() => (panel === "settings" ? closePanel() : openPanel("settings"))}>
+                Settings
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {active.status === STATUS.WIZARD && (
+        <BookWizard
+          file={active.file}
+          bookId={active.bookId}
+          meta={meta}
+          onMetaChange={(patch) => setMeta((m) => ({ ...m, ...patch }))}
+          toc={toc}
+          tocDirty={tocDirty}
+          onAddChapter={addChapter}
+          onInsertChapter={insertChapter}
+          onUpdateChapter={updateChapter}
+          onRemoveChapter={removeChapter}
+          onImportToc={(rows) => {
+            setToc(rows);
+            setTocDirty(true);
+          }}
+          onThumbnail={setThumbData}
+          onSave={handleWizardSave}
+          onCancel={close}
+        />
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,14 @@
+{
+  "name": "book-tracker",
+  "private": true,
+  "workspaces": ["server", "client"],
+  "scripts": {
+    "dev": "concurrently -k -n server,client -c blue,green \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "npm run dev --workspace server",
+    "dev:client": "npm run dev --workspace client",
+    "build": "npm run build --workspace client"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
