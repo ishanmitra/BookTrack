@@ -7,6 +7,7 @@
   --accent: #2f81f7;
   --green: #3fb950;
   --red: #f85149;
+  --purple: #a371f7;
   --yellow: #d29922;
 }
 
@@ -329,6 +330,25 @@ button:hover, a.ghost:hover, a.primary:hover, a.active-link:hover { border-color
 button.primary, a.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button.danger { color: var(--red); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Admin-only highlighted sections */
+.admin-only {
+  border-color: var(--purple);
+  border-style: dashed;
+}
+.admin-tag {
+  background: var(--purple);
+  color: #fff;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-radius: 8px;
+  padding: 2px 6px;
+  margin-left: 8px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+.danger-row.admin-forget { background: rgba(163, 113, 247, 0.06); border-radius: 6px; }
 
 .panel {
   background: var(--panel);

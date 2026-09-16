@@ -511,8 +511,8 @@ export default function App() {
                 </div>
                 <div className="drawer-body">
                   {user?.is_admin && (
-                  <section className="panel settings-section">
-                    <h2>Book metadata</h2>
+                  <section className="panel settings-section admin-only">
+                    <h2>Book metadata <span className="admin-tag">admin</span></h2>
                     <div className="meta-grid">
                       <label>Title
                         <input value={meta?.title || ""} onChange={(e) => setMeta((m) => ({ ...m, title: e.target.value }))} />
@@ -534,8 +534,8 @@ export default function App() {
                   )}
 
                   {user?.is_admin && (
-                  <section className="panel settings-section toc-panel">
-                    <h2>Table of contents <span className="muted">(edit chapter start pages)</span></h2>
+                  <section className="panel settings-section toc-panel admin-only">
+                    <h2>Table of contents <span className="muted">(edit chapter start pages)</span> <span className="admin-tag">admin</span></h2>
                     <TocTable rows={chapterRows} onChange={updateChapter} onRemove={removeChapter} onAdd={addChapter} onInsert={insertChapter} />
                     <div className="meta-actions">
                       <button onClick={importOutline}>Import from PDF outline</button>
@@ -566,7 +566,7 @@ export default function App() {
                       >Remove Stats</button>
                     </div>
                     {user?.is_admin && (
-                    <div className="danger-row">
+                    <div className="danger-row admin-forget">
                       <span>Forget Book — permanently delete the book and all progress.</span>
                       <button className="danger" onClick={() => handleForget(active.bookId)}>Forget Book</button>
                     </div>
