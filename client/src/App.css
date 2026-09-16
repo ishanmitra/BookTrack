@@ -304,7 +304,11 @@ body {
 .danger-row span { color: var(--muted); font-size: 12px; flex: 1; }
 .danger-row button { white-space: nowrap; }
 
-button {
+button,
+a.ghost,
+a.primary,
+a.active-link,
+a.user-menu-name {
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--border);
@@ -312,9 +316,15 @@ button {
   padding: 6px 12px;
   font-size: 13px;
   cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  line-height: inherit;
 }
-button:hover { border-color: var(--muted); }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:hover, a.ghost:hover, a.primary:hover, a.active-link:hover, a.user-menu-name:hover { border-color: var(--muted); }
+button.primary, a.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button.danger { color: var(--red); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 
@@ -359,7 +369,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .status-loading { background: #1c2536; color: var(--accent); }
 .status-error { background: #2d1414; color: var(--red); }
 .book-item-actions { display: flex; gap: 6px; margin-top: 8px; }
-.book-item-actions button { padding: 3px 8px; font-size: 12px; }
+.book-item-actions button, .book-item-actions a { padding: 3px 8px; font-size: 12px; }
 
 .empty-state {
   border: 1px dashed var(--border);

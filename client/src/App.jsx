@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useLocation, Navigate } from "react-router-dom";
+import { useNavigate, useLocation, Navigate, Link } from "react-router-dom";
 import api from "./api";
 import { STATUS, useLocalBook } from "./useLocalBook";
 import * as storage from "./storage";
@@ -304,9 +304,7 @@ export default function App() {
     navigate("/read/" + s.bookId);
   };
 
-  const goToProfile = () => { navigate("/user/" + ownUsername); setMenuOpen(false); };
   const signOut = async () => { await api.logout(); setUser(null); setMenuOpen(false); navigate("/"); };
-  const goToLibrary = () => navigate("/");
 
   const handleStopTracking = async (bookId) => { await stopTracking(bookId); navigate("/"); };
   const handleForget = async (bookId) => {
@@ -337,7 +335,7 @@ export default function App() {
         /* ── Profile page ──────────────────────────────────────────── */
         <section className="profile">
           <div className="profile-card">
-            <button className="ghost" onClick={goToLibrary}>← Library</button>
+            <Link className="ghost" to="/">← Library</Link>
             {user.avatar_url && <img className="profile-avatar" src={user.avatar_url} alt="" />}
             <h1 className="profile-name">{user.display_name}</h1>
             <p className="profile-username">@{ownUsername}</p>
@@ -362,13 +360,13 @@ export default function App() {
                   </button>
                   {menuOpen && (
                     <div className="user-menu-pop">
-                      <button className="user-menu-name" onClick={goToProfile}>{user.display_name}</button>
+                      <Link className="user-menu-name" to={"/user/" + ownUsername}>{user.display_name}</Link>
                       <button className="user-menu-item" onClick={signOut}>Sign out</button>
                     </div>
                   )}
                 </div>
               ) : (
-                <button className="primary" onClick={() => api.signIn()}>Sign in with GitHub</button>
+                <a className="primary" href="/api/auth/github">Sign in with GitHub</a>
               )}
             </div>
           </header>
@@ -400,8 +398,8 @@ export default function App() {
                       <button onClick={(e) => { e.stopPropagation(); reconnect(s.bookId); }}>Reconnect</button>
                     ) : (
                       <>
-                        <button className="ghost" onClick={(e) => { e.stopPropagation(); navigate("/book/" + s.bookId); }}>Info</button>
-                        <button className="primary" onClick={(e) => { e.stopPropagation(); reconnect(s.bookId); navigate("/read/" + s.bookId); }}>Open</button>
+                        <Link className="ghost" to={"/book/" + s.bookId} onClick={(e) => e.stopPropagation()}>Info</Link>
+                        <Link className="primary" to={"/read/" + s.bookId} onClick={(e) => { e.stopPropagation(); reconnect(s.bookId); }}>Open</Link>
                       </>
                     )}
                   </div>
@@ -481,7 +479,7 @@ export default function App() {
                   {!user && (
                     <div className="activity-nudge">
                       <p>Sign in with your GitHub account to start tracking reading sessions and commit progress.</p>
-                      <button className="primary" onClick={() => api.signIn()}>Sign in with GitHub</button>
+                      <a className="primary" href="/api/auth/github">Sign in with GitHub</a>
                     </div>
                   )}
                   <div className="book-overview">
@@ -582,7 +580,7 @@ export default function App() {
           </div>
 
           <div className="viewer-top">
-            <button className="ghost" onClick={() => { readerRef.current?.pause(); close(); navigate("/"); }}>← Library</button>
+            <Link className="ghost" to="/" onClick={() => { readerRef.current?.pause(); close(); }}>← Library</Link>
             <strong className="viewer-title" title={bookTitle}>
               {bookTitle}
               {meta?.author ? <span className="viewer-author"> — {meta.author}</span> : null}

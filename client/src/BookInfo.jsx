@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import api from "./api";
 
 export default function BookInfo({ slug, thumb }) {
-  const navigate = useNavigate();
   const [book, setBook] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -23,7 +22,7 @@ export default function BookInfo({ slug, thumb }) {
     return (
       <section className="book-info">
         <div className="book-info-card">
-          <button className="ghost" onClick={() => navigate("/")}>← Library</button>
+          <Link className="ghost" to="/">← Library</Link>
           <p className="muted">Loading…</p>
         </div>
       </section>
@@ -34,7 +33,7 @@ export default function BookInfo({ slug, thumb }) {
     return (
       <section className="book-info">
         <div className="book-info-card">
-          <button className="ghost" onClick={() => navigate("/")}>← Library</button>
+          <Link className="ghost" to="/">← Library</Link>
           <p className="muted">{error || "Book not found"}</p>
         </div>
       </section>
@@ -44,7 +43,7 @@ export default function BookInfo({ slug, thumb }) {
   return (
     <section className="book-info">
       <div className="book-info-card">
-        <button className="ghost" onClick={() => navigate("/")}>← Library</button>
+        <Link className="ghost" to="/">← Library</Link>
         <div className="book-info-head">
           {thumb && <img className="book-info-cover" src={thumb} alt="" />}
           <div className="book-info-details">
@@ -56,9 +55,9 @@ export default function BookInfo({ slug, thumb }) {
             </div>
           </div>
         </div>
-        <button className="primary" onClick={() => navigate("/read/" + slug)}>
+        <Link className="primary" to={"/read/" + slug}>
           Read on this device
-        </button>
+        </Link>
       </div>
     </section>
   );
