@@ -130,15 +130,27 @@ body {
   flex-direction: column;
   gap: 14px;
 }
-.book-info-title { margin: 0; font-size: 24px; }
-.book-info-cover {
-  width: 168px;
-  height: auto;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  align-self: center;
+.book-info-title { margin: 0; font-size: 22px; }
+.book-info-head {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
 }
-.book-info-author { margin: -8px 0 0; color: var(--muted); font-size: 15px; }
+.book-info-cover {
+  width: 56px;
+  max-height: 76px;
+  object-fit: contain;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.book-info-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.book-info-author { margin: 0; color: var(--muted); font-size: 15px; }
 .book-info-meta {
   display: flex;
   flex-wrap: wrap;

@@ -45,13 +45,17 @@ export default function BookInfo({ slug, thumb }) {
     <section className="book-info">
       <div className="book-info-card">
         <button className="ghost" onClick={() => navigate("/")}>← Library</button>
-        {thumb && <img className="book-info-cover" src={thumb} alt="" />}
-        <h1 className="book-info-title">{book.title}</h1>
-        <p className="book-info-author">{book.author}</p>
-        <div className="book-info-meta">
-          {book.edition != null && <span>Edition {book.edition}</span>}
-          {book.page_count != null && <span>{book.page_count} pages</span>}
-          <span className="book-info-slug">/{book.slug}</span>
+        <div className="book-info-head">
+          {thumb && <img className="book-info-cover" src={thumb} alt="" />}
+          <div className="book-info-details">
+            <h1 className="book-info-title">{book.title}</h1>
+            {book.author && <p className="book-info-author">{book.author}</p>}
+            <div className="book-info-meta">
+              {book.edition != null && <span>Edition {book.edition}</span>}
+              {book.page_count != null && <span>{book.page_count} pages</span>}
+              <span className="book-info-slug">/{book.slug}</span>
+            </div>
+          </div>
         </div>
         <button className="primary" onClick={() => navigate("/read/" + slug)}>
           Read on this device
