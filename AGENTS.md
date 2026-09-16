@@ -76,7 +76,7 @@ from the server's `bt_session` cookie via `GET /api/auth/me`.
 - `GET /api/books/:id/commits` — your own commits only
 - `GET /api/auth/github` — redirect to GitHub authorize (client_id, scope `read:user`, random `state`)
 - `GET /api/auth/github/callback` — exchange code → upsert `users` by `github_id` → set httpOnly `bt_session` cookie → redirect
-- `GET /api/auth/me` → `{user: {id, display_name, avatar_url, is_admin} | null}`
+- `GET /api/auth/me` → `{user: {id, display_name, username, avatar_url, is_admin} | null}`
 - `POST /api/auth/logout`
 - Optional `API_KEY`: when set, every `/api` request must send the matching `x-api-key` header.
 - **Commits are never anonymous:** every commit endpoint is behind `auth.requireAuth`; the user is derived from the session cookie, and any client-declared identity is ignored. `PdfReader`'s Start session is gated on being signed in.
@@ -259,6 +259,18 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
   restart signs everyone out (harmless, devs just re-login).
 - Bug fixes: TDZ hook order (blank page), sidebar not updating on book add,
   keyboard listener stealing form input.
+- **React Router (Phase C)**: URL-based navigation via `react-router-dom`
+  (`<BrowserRouter>` in `main.jsx`, `useNavigate`/`useLocation` in `App.jsx`).
+  Routes: `/` library, `/user/:username` profile (self only for now; others
+  redirect home), `/book/:bookKey` reader. Landing on `/book/:bookKey` triggers
+  auto-reconnect (with a `reconnectTriggeredRef` guard to avoid double calls);
+  navigating away from a book route calls `close()`. Profile uses the GitHub
+  `username` (stored in a new `users.username` column, migration v2, populated
+  from `me.login` in the OAuth callback; `/api/auth/me` now returns it). A
+  production SPA fallback in `server/index.js` serves `client/dist/index.html`
+  for any non-`/api` GET route so browser refresh works on nested routes
+  (dev refresh still flows through the Vite proxy; the fallback only matters
+  when serving via the Express server).
 
 ## Not built yet (next steps)
 

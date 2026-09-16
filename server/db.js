@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS users (
   user_key TEXT UNIQUE NOT NULL,
   display_name TEXT,
   avatar_url TEXT,
+  username TEXT,
   github_id TEXT UNIQUE,
   is_admin INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
@@ -54,14 +55,18 @@ function ensureColumn(table, column, ddl) {
   if (!cols.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
 }
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 function migrate() {
   const version = db.pragma("user_version", { simple: true }) || 0;
   if (version < 1) {
     ensureColumn("commits", "user_id", "user_id INTEGER REFERENCES users(id)");
     db.exec("CREATE INDEX IF NOT EXISTS idx_commits_user ON commits(user_id)");
     db.exec("CREATE INDEX IF NOT EXISTS idx_commits_book ON commits(book_id)");
-    db.pragma(`user_version = ${SCHEMA_VERSION}`, { simple: true });
+    db.pragma(`user_version = 1`, { simple: true });
+  }
+  if (version < 2) {
+    ensureColumn("users", "username", "username TEXT");
+    db.pragma(`user_version = 2`, { simple: true });
   }
 }
 migrate();
@@ -87,9 +92,9 @@ const q = {
   getUserById: db.prepare("SELECT * FROM users WHERE id = ?"),
   getUserByGithubId: db.prepare("SELECT * FROM users WHERE github_id = ?"),
   insertGithubUser: db.prepare(
-    "INSERT INTO users (user_key, display_name, avatar_url, github_id, is_admin, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    "INSERT INTO users (user_key, display_name, avatar_url, username, github_id, is_admin, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
   ),
-  updateGithubUser: db.prepare("UPDATE users SET display_name = ?, avatar_url = ?, is_admin = ? WHERE id = ?"),
+  updateGithubUser: db.prepare("UPDATE users SET display_name = ?, avatar_url = ?, username = ?, is_admin = ? WHERE id = ?"),
   deleteBook: db.prepare("DELETE FROM books WHERE id = ?"),
 };
 
@@ -159,16 +164,23 @@ export function getUserById(id) {
   return q.getUserById.get(id) ?? null;
 }
 
-export function getOrCreateGithubUser({ githubId, displayName, avatarUrl, isAdmin }) {
+export function getOrCreateGithubUser({ githubId, displayName, avatarUrl, username, isAdmin }) {
   const existing = q.getUserByGithubId.get(githubId);
   if (existing) {
-    q.updateGithubUser.run(displayName ?? existing.display_name, avatarUrl ?? existing.avatar_url, isAdmin ? 1 : 0, existing.id);
+    q.updateGithubUser.run(
+      displayName ?? existing.display_name,
+      avatarUrl ?? existing.avatar_url,
+      username ?? existing.username,
+      isAdmin ? 1 : 0,
+      existing.id
+    );
     return q.getUserById.get(existing.id);
   }
   const info = q.insertGithubUser.run(
     randomUUID(),
     displayName ?? null,
     avatarUrl ?? null,
+    username ?? null,
     githubId,
     isAdmin ? 1 : 0,
     isoNow()

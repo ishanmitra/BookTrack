@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useLocation, Navigate } from "react-router-dom";
 import api from "./api";
 import { STATUS, useLocalBook } from "./useLocalBook";
 import * as storage from "./storage";
@@ -28,7 +29,13 @@ function fmtClock(totalSeconds) {
 }
 
 export default function App() {
-  const { saved, active, pick, reconnect, stopTracking, forget, removeStats, close, beginReading, persistSavedMeta, supportsFileSystem } = useLocalBook();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const {
+    saved, active, pick, reconnect, stopTracking, forget, removeStats,
+    close, beginReading, persistSavedMeta, supportsFileSystem,
+  } = useLocalBook();
+
   const [commits, setCommits] = useState([]);
   const [commitsLoading, setCommitsLoading] = useState(false);
   const [meta, setMeta] = useState(null);
@@ -45,8 +52,43 @@ export default function App() {
   const [thumbs, setThumbs] = useState({});
   const [thumbData, setThumbData] = useState(null);
   const [user, setUser] = useState(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
   const activeBookIdRef = useRef(null);
   const readerRef = useRef(null);
+  const reconnectTriggeredRef = useRef(null);
+
+  // ── route derivation ──────────────────────────────────────────────
+  const profileUsername = location.pathname.match(/^\/user\/([^/]+)/)?.[1] || null;
+  const isProfile = profileUsername != null;
+  const ownUsername = user?.username || user?.display_name || "";
+  const isOwnProfile = isProfile && !!user && profileUsername.toLowerCase() === ownUsername.toLowerCase();
+  const bookKey = location.pathname.match(/^\/book\/([^/]+)/)?.[1] || null;
+  const showLibrary = !isProfile && !bookKey;
+  const bookOpen = !!bookKey && active.file != null;
+  const readerOpen = active.status === STATUS.READY && active.file != null;
+
+  // ── auto-reconnect when URL lands on /book/:key ───────────────────
+  useEffect(() => {
+    if (!bookKey) return;
+    if (active.bookId === bookKey) return;
+    if (reconnectTriggeredRef.current === bookKey) return;
+    reconnectTriggeredRef.current = bookKey;
+    reconnect(bookKey).catch(() => {});
+  }, [bookKey, active.bookId, reconnect]);
+
+  // ── clear active book when navigating away from /book/:key ────────
+  useEffect(() => {
+    if (!bookKey && reconnectTriggeredRef.current) {
+      reconnectTriggeredRef.current = null;
+      close();
+    }
+  }, [bookKey, close]);
+
+  // ── boot ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    api.me().then((r) => setUser(r.user)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     storage
@@ -60,14 +102,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    api.me().then((r) => setUser(r.user)).catch(() => {});
+    const onPointerDown = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
   }, []);
 
-  const visibleCommits = useMemo(
-    () => (selectedDay ? commits.filter((c) => String(c.started_at || "").startsWith(selectedDay)) : commits),
-    [commits, selectedDay]
-  );
-
+  // ── commits / queue ───────────────────────────────────────────────
   const loadCommits = useCallback(async (bookId) => {
     if (!bookId) return;
     setCommitsLoading(true);
@@ -133,6 +175,7 @@ export default function App() {
     [flushQueue]
   );
 
+  // ── panels ────────────────────────────────────────────────────────
   const openPanel = useCallback((p) => {
     clearTimeout(drawerTimerRef.current);
     setDrawerLeaving(false);
@@ -148,10 +191,10 @@ export default function App() {
     }, 210);
   }, []);
 
+  // ── metadata / TOC ────────────────────────────────────────────────
   const saveMeta = async (patch) => {
     const clientId = active.bookId;
     const serverId = active.book?.id;
-
     if (!clientId || !serverId) return;
     try {
       const updated = await api.updateBook(serverId, { ...meta, ...patch, toc });
@@ -165,10 +208,7 @@ export default function App() {
     }
   };
 
-  const addChapter = () => {
-    setToc((t) => [...t, { title: "New chapter", startPage: 1 }]);
-    setTocDirty(true);
-  };
+  const addChapter = () => { setToc((t) => [...t, { title: "New chapter", startPage: 1 }]); setTocDirty(true); };
   const insertChapter = (i) => {
     setToc((t) => {
       const start = t[i] ? Number(t[i].startPage) || 1 : t.length ? Number(t[t.length - 1].startPage) || 1 : 1;
@@ -179,25 +219,14 @@ export default function App() {
   const importOutline = async () => {
     try {
       const rows = await readerRef.current?.getOutline?.();
-      if (!rows || rows.length === 0) {
-        setNotice("No embedded outline found in this PDF.");
-        return;
-      }
+      if (!rows || rows.length === 0) { setNotice("No embedded outline found in this PDF."); return; }
       setToc(rows.map(({ title, startPage }) => ({ title, startPage })));
       setTocDirty(true);
       setNotice(`Imported ${rows.length} entries from the PDF outline. Review, edit, then Save TOC.`);
-    } catch (err) {
-      setNotice(`Couldn't import outline: ${err.message}`);
-    }
+    } catch (err) { setNotice(`Couldn't import outline: ${err.message}`); }
   };
-  const updateChapter = (i, patch) => {
-    setToc((t) => t.map((c, j) => (j === i ? { ...c, ...patch } : c)));
-    setTocDirty(true);
-  };
-  const removeChapter = (i) => {
-    setToc((t) => t.filter((_, j) => j !== i));
-    setTocDirty(true);
-  };
+  const updateChapter = (i, patch) => { setToc((t) => t.map((c, j) => (j === i ? { ...c, ...patch } : c))); setTocDirty(true); };
+  const removeChapter = (i) => { setToc((t) => t.filter((_, j) => j !== i)); setTocDirty(true); };
 
   const chapterRows = useMemo(() => {
     const visited = new Set();
@@ -210,34 +239,60 @@ export default function App() {
       const start = Number(c.startPage) || 1;
       const nextStart = toc[i + 1] ? Number(toc[i + 1].startPage) || 1 : null;
       const end = nextStart != null ? nextStart - 1 : pc != null ? pc : null;
-      let span = 0;
-      let vis = 0;
-      if (end != null && end >= start) {
-        span = end - start + 1;
-        for (let p = start; p <= end; p++) if (visited.has(p)) vis++;
-      }
+      let span = 0, vis = 0;
+      if (end != null && end >= start) { span = end - start + 1; for (let p = start; p <= end; p++) if (visited.has(p)) vis++; }
       return { ...c, startPage: start, span, visited: vis };
     });
   }, [commits, toc, pageCount, active.book?.page_count]);
 
-  const bookOpen = active.bookId != null;
-  const readerOpen = active.status === STATUS.READY && active.file;
-  const showLibrary = !bookOpen || active.status === STATUS.WIZARD;
+  const visibleCommits = useMemo(
+    () => (selectedDay ? commits.filter((c) => String(c.started_at || "").startsWith(selectedDay)) : commits),
+    [commits, selectedDay]
+  );
 
+  // ── paused session badge ──────────────────────────────────────────
   useEffect(() => {
     let alive = true;
-    storage
-      .getPendingSession()
-      .then((s) => {
-        if (alive) setPausedSession(s && s.paused && s.bookKey ? s : null);
-      })
+    storage.getPendingSession()
+      .then((s) => { if (alive) setPausedSession(s && s.paused && s.bookKey ? s : null); })
       .catch(() => {});
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [bookOpen]);
 
   const pausedSeconds = pausedSession ? Object.values(pausedSession.secondsPerPage || {}).reduce((a, b) => a + b, 0) : 0;
+
+  // ── wizard ────────────────────────────────────────────────────────
+  const handleWizardSave = async () => {
+    const bookId = active.bookId;
+    if (!bookId) return;
+    await saveMeta({});
+    if (thumbData) {
+      try { await storage.saveThumbnail(bookId, thumbData); setThumbs((m) => ({ ...m, [bookId]: thumbData })); }
+      catch { console.error("thumbnail save failed"); }
+    }
+    beginReading();
+    navigate("/book/" + bookId);
+  };
+
+  // ── navigation helpers ────────────────────────────────────────────
+  const openBook = (s) => {
+    reconnectTriggeredRef.current = s.bookId;
+    if (statusForMeta(s) === STATUS.MISSING) pick(s.bookId);
+    else reconnect(s.bookId);
+    navigate("/book/" + s.bookId);
+  };
+
+  const goToProfile = () => { navigate("/user/" + ownUsername); setMenuOpen(false); };
+  const signOut = async () => { await api.logout(); setUser(null); setMenuOpen(false); navigate("/"); };
+  const goToLibrary = () => navigate("/");
+
+  const handleStopTracking = async (bookId) => { await stopTracking(bookId); navigate("/"); };
+  const handleForget = async (bookId) => {
+    if (!window.confirm("Forget this book? Its stats, commits, and local data will be permanently deleted.")) return;
+    await forget(bookId);
+    navigate("/");
+  };
+
   const metaDirty =
     (meta?.title ?? "") !== (metaBase?.title ?? "") ||
     (meta?.author ?? "") !== (metaBase?.author ?? "") ||
@@ -245,35 +300,30 @@ export default function App() {
   const bookTitle =
     meta?.title || active.book?.title || (storage.loadSavedMeta()[active.bookId] || {}).title || "Book";
 
-  const handleWizardSave = async () => {
-    const bookId = active.bookId;
-    if (!bookId) return;
-    await saveMeta({});
-    if (thumbData) {
-      try {
-        await storage.saveThumbnail(bookId, thumbData);
-        setThumbs((m) => ({ ...m, [bookId]: thumbData }));
-      } catch {
-        console.error("thumbnail save failed");
-      }
-    }
-    beginReading();
-  };
-
-  const openBook = (s) => {
-    if (statusForMeta(s) === STATUS.MISSING) pick(s.bookId);
-    else reconnect(s.bookId);
-  };
-
+  // ── render ────────────────────────────────────────────────────────
   return (
     <div className="app">
       {notice && (
-        <div className="notice" onClick={() => setNotice("")}>
-          {notice}
-        </div>
+        <div className="notice" onClick={() => setNotice("")}>{notice}</div>
       )}
 
-      {showLibrary ? (
+      {isProfile && !user && <Navigate to="/" replace />}
+      {isProfile && !!user && !isOwnProfile && <Navigate to="/" replace />}
+
+      {isProfile && isOwnProfile ? (
+        /* ── Profile page ──────────────────────────────────────────── */
+        <section className="profile">
+          <div className="profile-card">
+            <button className="ghost" onClick={goToLibrary}>← Library</button>
+            {user.avatar_url && <img className="profile-avatar" src={user.avatar_url} alt="" />}
+            <h1 className="profile-name">{user.display_name}</h1>
+            <p className="profile-username">@{ownUsername}</p>
+            {user.is_admin ? <span className="badge">admin</span> : null}
+            <button className="ghost" onClick={signOut}>Sign out</button>
+          </div>
+        </section>
+      ) : showLibrary ? (
+        /* ── Library / home ────────────────────────────────────────── */
         <section className="library">
           <header className="library-top">
             <div>
@@ -281,18 +331,25 @@ export default function App() {
               <span className="tagline">git-style reading progress for technical books</span>
             </div>
             <div className="library-user">
+              <button className="primary" onClick={() => pick()} disabled={active.status === STATUS.WIZARD}>+ Add a book</button>
               {user ? (
-                <>
-                  {user.avatar_url && <img className="user-avatar" src={user.avatar_url} alt="" />}
-                  <span className="user-name">{user.display_name}</span>
-                  <button className="ghost" onClick={() => api.logout().then(() => setUser(null))}>Sign out</button>
-                </>
+                <div className="user-menu" ref={menuRef}>
+                  <button className="user-menu-toggle" onClick={() => setMenuOpen((v) => !v)} aria-label="Account menu">
+                    {user.avatar_url && <img className="user-avatar" src={user.avatar_url} alt="" />}
+                  </button>
+                  {menuOpen && (
+                    <div className="user-menu-pop">
+                      <button className="user-menu-name" onClick={goToProfile}>{user.display_name}</button>
+                      <button className="user-menu-item" onClick={signOut}>Sign out</button>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <button className="primary" onClick={() => api.signIn()}>Sign in with GitHub</button>
               )}
-              <button className="primary" onClick={() => pick()} disabled={active.status === STATUS.WIZARD}>+ Add a book</button>
             </div>
           </header>
+
           {supportsFileSystem === false && (
             <p className="hint">Your browser lacks the File System Access API — use Chrome/Edge/Safari.</p>
           )}
@@ -302,34 +359,33 @@ export default function App() {
           <ul className="book-list library-list">
             {saved.map((s) => (
               <li key={s.bookId} className="book-item library-item" onClick={() => openBook(s)}>
-                {thumbs[s.bookId] && (
-                  <img className="book-thumb" src={thumbs[s.bookId]} alt="" />
-                )}
+                {thumbs[s.bookId] && <img className="book-thumb" src={thumbs[s.bookId]} alt="" />}
                 <div className="book-item-body">
-                <div className="book-item-main">
-                  <strong className="book-title">{s.meta?.title || "Book"}</strong>
-                  <div className="book-item-tags">
-                    <span className={`status status-${statusForMeta(s)}`}>{STATUS_LABEL[statusForMeta(s)] || "idle"}</span>
-                    {pausedSession?.bookKey === s.meta?.fingerprint && (
-                      <span className="paused-badge">⏸ paused · {fmtClock(pausedSeconds)}</span>
+                  <div className="book-item-main">
+                    <strong className="book-title">{s.meta?.title || "Book"}</strong>
+                    <div className="book-item-tags">
+                      <span className={`status status-${statusForMeta(s)}`}>{STATUS_LABEL[statusForMeta(s)] || "idle"}</span>
+                      {pausedSession?.bookKey === s.meta?.fingerprint && (
+                        <span className="paused-badge">⏸ paused · {fmtClock(pausedSeconds)}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="book-item-actions">
+                    {statusForMeta(s) === STATUS.MISSING ? (
+                      <button onClick={(e) => { e.stopPropagation(); pick(s.bookId); }}>Locate file</button>
+                    ) : statusForMeta(s) === STATUS.PERMISSION || statusForMeta(s) === STATUS.ERROR ? (
+                      <button onClick={(e) => { e.stopPropagation(); reconnect(s.bookId); }}>Reconnect</button>
+                    ) : (
+                      <button className="primary" onClick={(e) => { e.stopPropagation(); reconnect(s.bookId); navigate("/book/" + s.bookId); }}>Open</button>
                     )}
                   </div>
-                </div>
-                <div className="book-item-actions">
-                  {statusForMeta(s) === STATUS.MISSING ? (
-                    <button onClick={(e) => { e.stopPropagation(); pick(s.bookId); }}>Locate file</button>
-                  ) : statusForMeta(s) === STATUS.PERMISSION || statusForMeta(s) === STATUS.ERROR ? (
-                    <button onClick={(e) => { e.stopPropagation(); reconnect(s.bookId); }}>Reconnect</button>
-                  ) : (
-                    <button className="primary" onClick={(e) => { e.stopPropagation(); reconnect(s.bookId); }}>Open</button>
-                  )}
-                </div>
                 </div>
               </li>
             ))}
           </ul>
         </section>
       ) : (
+        /* ── Reader view (/book/:key) ──────────────────────────────── */
         <div className="viewer-scene">
           <div className="reader-top" id="reader-toolbar-slot" />
           <div className="viewer-main">
@@ -340,12 +396,22 @@ export default function App() {
               book={{ ...active.book, toc }}
               onSessionEnd={handleSessionEnd}
               onPagesKnown={setPageCount}
-              onClose={close}
+              onClose={() => { close(); navigate("/"); }}
               signedIn={!!user}
               onNotice={setNotice}
             />
           ) : (
             <div className="reader error-backdrop">
+              {active.status === STATUS.IDLE && (
+                <div className="empty-state">
+                  <h3>No file connected</h3>
+                  <p>Select a PDF to start reading.</p>
+                  <button className="primary" onClick={() => reconnect(bookKey)}>Locate file…</button>
+                </div>
+              )}
+              {active.status === STATUS.LOADING && (
+                <p className="muted">Loading…</p>
+              )}
               {active.status === STATUS.MISSING && (
                 <div className="empty-state">
                   <h3>The book file is missing</h3>
@@ -425,21 +491,13 @@ export default function App() {
                       </label>
                     </div>
                     <div className="meta-actions">
-                      <button onClick={() => saveMeta({})} disabled={!metaDirty}>
-                        Save
-                      </button>
+                      <button onClick={() => saveMeta({})} disabled={!metaDirty}>Save</button>
                     </div>
                   </section>
 
                   <section className="panel settings-section toc-panel">
                     <h2>Table of contents <span className="muted">(edit chapter start pages)</span></h2>
-                    <TocTable
-                      rows={chapterRows}
-                      onChange={updateChapter}
-                      onRemove={removeChapter}
-                      onAdd={addChapter}
-                      onInsert={insertChapter}
-                    />
+                    <TocTable rows={chapterRows} onChange={updateChapter} onRemove={removeChapter} onAdd={addChapter} onInsert={insertChapter} />
                     <div className="meta-actions">
                       <button onClick={importOutline}>Import from PDF outline</button>
                       {tocDirty && <button onClick={() => saveMeta({})}>Save TOC</button>}
@@ -450,7 +508,7 @@ export default function App() {
                     <h2>Danger zone</h2>
                     <div className="danger-row">
                       <span>Remove Book — detach this file; stats stay on the server.</span>
-                      <button className="danger" onClick={() => stopTracking(active.bookId)}>Remove Book</button>
+                      <button className="danger" onClick={() => handleStopTracking(active.bookId)}>Remove Book</button>
                     </div>
                     <div className="danger-row">
                       <span>Remove Stats — delete all reading progress for this book.</span>
@@ -469,14 +527,7 @@ export default function App() {
                     </div>
                     <div className="danger-row">
                       <span>Forget Book — permanently delete the book and all progress.</span>
-                      <button
-                        className="danger"
-                        onClick={() => {
-                          if (window.confirm("Forget this book? Its stats, commits, and local data will be permanently deleted.")) {
-                            forget(active.bookId);
-                          }
-                        }}
-                      >Forget Book</button>
+                      <button className="danger" onClick={() => handleForget(active.bookId)}>Forget Book</button>
                     </div>
                   </section>
                 </div>
@@ -487,18 +538,14 @@ export default function App() {
           </div>
 
           <div className="viewer-top">
-            <button className="ghost" onClick={() => { readerRef.current?.pause(); close(); }}>← Library</button>
+            <button className="ghost" onClick={() => { readerRef.current?.pause(); close(); navigate("/"); }}>← Library</button>
             <strong className="viewer-title" title={bookTitle}>
               {bookTitle}
               {meta?.author ? <span className="viewer-author"> — {meta.author}</span> : null}
             </strong>
             <div className="viewer-top-actions">
-              <button className={panel === "info" ? "active" : ""} onClick={() => (panel === "info" ? closePanel() : openPanel("info"))}>
-                Activity
-              </button>
-              <button className={panel === "settings" ? "active" : ""} onClick={() => (panel === "settings" ? closePanel() : openPanel("settings"))}>
-                Settings
-              </button>
+              <button className={panel === "info" ? "active" : ""} onClick={() => (panel === "info" ? closePanel() : openPanel("info"))}>Activity</button>
+              <button className={panel === "settings" ? "active" : ""} onClick={() => (panel === "settings" ? closePanel() : openPanel("settings"))}>Settings</button>
             </div>
           </div>
         </div>
@@ -516,10 +563,7 @@ export default function App() {
           onInsertChapter={insertChapter}
           onUpdateChapter={updateChapter}
           onRemoveChapter={removeChapter}
-          onImportToc={(rows) => {
-            setToc(rows);
-            setTocDirty(true);
-          }}
+          onImportToc={(rows) => { setToc(rows); setTocDirty(true); }}
           onThumbnail={setThumbData}
           onSave={handleWizardSave}
           onCancel={close}

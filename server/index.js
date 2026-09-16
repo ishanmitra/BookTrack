@@ -1,9 +1,13 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import "dotenv/config";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 import cors from "cors";
 import express from "express";
 import * as db from "./db.js";
 import * as auth from "./auth.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 app.set("trust proxy", 1);
@@ -64,6 +68,7 @@ app.get("/api/auth/github/callback", async (req, res) => {
       githubId: String(me.id),
       displayName: me.name || me.login,
       avatarUrl: me.avatar_url,
+      username: me.login,
       isAdmin,
     });
     auth.startSession(res, user);
@@ -77,7 +82,7 @@ app.get("/api/auth/github/callback", async (req, res) => {
 app.get("/api/auth/me", (req, res) => {
   const u = auth.currentUser(req);
   res.json({
-    user: u ? { id: u.id, display_name: u.display_name, avatar_url: u.avatar_url, is_admin: u.is_admin } : null,
+    user: u ? { id: u.id, display_name: u.display_name, username: u.username, avatar_url: u.avatar_url, is_admin: u.is_admin } : null,
   });
 });
 
@@ -144,6 +149,15 @@ app.get("/api/books/:id/commits", auth.requireAuth, (req, res) => {
 app.delete("/api/books/:id/commits", auth.requireAuth, (req, res) => {
   db.deleteBookCommits(Number(req.params.id), req.user.id);
   res.json({ ok: true });
+});
+
+// SPA fallback — serve the built client for non-API routes so browser
+// refresh works on client-side routes (/user/:username, /book/:key).
+const clientDist = path.join(__dirname, "..", "client", "dist");
+app.use(express.static(clientDist));
+app.get("*", (req, res) => {
+  if (req.path.startsWith("/api")) return res.status(404).json({ error: "not found" });
+  res.sendFile(path.join(clientDist, "index.html"));
 });
 
 const port = process.env.PORT || 4000;
