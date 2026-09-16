@@ -116,6 +116,35 @@ body {
   border-radius: 10px;
   padding: 2px 8px;
 }
+
+/* Book info page */
+.book-info { max-width: 860px; margin: 0 auto; padding: 24px 8px 40px; }
+.book-info-card {
+  max-width: 640px;
+  margin: 40px auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.book-info-title { margin: 0; font-size: 24px; }
+.book-info-author { margin: -8px 0 0; color: var(--muted); font-size: 15px; }
+.book-info-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  color: var(--muted);
+  font-size: 13px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.book-info-slug { font-family: monospace; }
+.book-info-toc h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin: 8px 0; }
+.book-info-toc ol { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.book-info .primary { align-self: flex-start; margin-top: 8px; }
 .library .hint { color: var(--muted); font-size: 13px; margin: 8px 0; }
 .library-list .library-item { cursor: pointer; transition: border-color 0.15s; }
 .library-item:hover { border-color: var(--accent); }

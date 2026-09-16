@@ -1,0 +1,71 @@
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import api from "./api";
+
+export default function BookInfo({ slug }) {
+  const navigate = useNavigate();
+  const [book, setBook] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    setError(null);
+    api
+      .getBookBySlug(slug)
+      .then((b) => { if (alive) { setBook(b); setLoading(false); } })
+      .catch((err) => { if (alive) { setError(err.message); setLoading(false); } });
+    return () => { alive = false; };
+  }, [slug]);
+
+  if (loading) {
+    return (
+      <section className="book-info">
+        <div className="book-info-card">
+          <button className="ghost" onClick={() => navigate("/")}>← Library</button>
+          <p className="muted">Loading…</p>
+        </div>
+      </section>
+    );
+  }
+
+  if (error || !book) {
+    return (
+      <section className="book-info">
+        <div className="book-info-card">
+          <button className="ghost" onClick={() => navigate("/")}>← Library</button>
+          <p className="muted">{error || "Book not found"}</p>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="book-info">
+      <div className="book-info-card">
+        <button className="ghost" onClick={() => navigate("/")}>← Library</button>
+        <h1 className="book-info-title">{book.title}</h1>
+        <p className="book-info-author">{book.author}</p>
+        <div className="book-info-meta">
+          {book.edition != null && <span>Edition {book.edition}</span>}
+          {book.page_count != null && <span>{book.page_count} pages</span>}
+          <span className="book-info-slug">/{book.slug}</span>
+        </div>
+        {book.toc && book.toc.length > 0 && (
+          <div className="book-info-toc">
+            <h2>Chapters</h2>
+            <ol>
+              {book.toc.map((c, i) => (
+                <li key={i}>{c.title} <span className="muted">(p. {c.startPage})</span></li>
+              ))}
+            </ol>
+          </div>
+        )}
+        <button className="primary" onClick={() => navigate("/read/" + slug)}>
+          Read on this device
+        </button>
+      </div>
+    </section>
+  );
+}

@@ -39,6 +39,7 @@ book-tracker/
 └── client/               # React + Vite + pdfjs-dist
     └── src/
         ├── App.jsx           # home/library list → fullscreen viewer; Activity + Settings floating drawers
+        ├── BookInfo.jsx      # minimal book info page (/book/:slug): title/author/edition/pages/slug/TOC + "Read on this device" (→ /read/:slug)
         ├── useLocalBook.js   # File System Access API: pick/persist/restore/missing/relocate; close()/forget()/removeStats(); beginReading()
         ├── BookWizard.jsx    # add-book setup modal (before reader opens): metadata, TOC, page-1 thumbnail
         ├── PdfReader.jsx     # pdf.js renderer + dwell tracking + session lifecycle
@@ -268,7 +269,8 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
 - **React Router (Phase C)**: URL-based navigation via `react-router-dom`
   (`<BrowserRouter>` in `main.jsx`, `useNavigate`/`useLocation` in `App.jsx`).
   Routes: `/` library, `/user/:username` profile (self only for now; others
-  redirect home), `/book/:bookKey` reader. Landing on `/book/:bookKey` triggers
+  redirect home), `/book/:slug` book info page (see below), `/read/:slug`
+  reader. Landing on `/read/:slug` triggers
   auto-reconnect (with a `reconnectTriggeredRef` guard to avoid double calls);
   navigating away from a book route calls `close()`. Profile uses the GitHub
   `username` (stored in a new `users.username` column, migration v2, populated
@@ -301,6 +303,12 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
   `migrateLegacyBookKeys()` on boot re-keys any leftover UUID-keyed data. The
   wizard's Save and slug edits navigate by the *final* slug returned by the
   server (not a possibly-stale client id).
+- **Book info page**: `/book/:slug` now renders `BookInfo.jsx` — a minimal page
+  showing title, author, edition, page count, slug, table of contents, and a
+  "Read on this device" button. The PDF reader lives at `/read/:slug` (auto-
+  reconnects on landing). Library item clicks and the wizard's Save navigate to
+  the info page; the reader closes back to the library. The `/api/book/:slug`
+  endpoint is public (no auth required).
 
 ## Not built yet (next steps)
 

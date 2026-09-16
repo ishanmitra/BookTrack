@@ -23,6 +23,7 @@ const api = {
   listBooks: () => request("/api/books"),
   upsertBook: (b) => request("/api/books", { method: "POST", body: JSON.stringify(b) }),
   getBook: (id) => request(`/api/books/${id}`),
+  getBookBySlug: (slug) => request(`/api/book/${slug}`),
   updateBook: (id, patch) => request(`/api/books/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteBook: (id) => request(`/api/books/${id}`, { method: "DELETE" }),
   deleteBookCommits: (id) => request(`/api/books/${id}/commits`, { method: "DELETE" }),

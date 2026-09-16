@@ -9,6 +9,7 @@ import PageHeatmap from "./PageHeatmap";
 import TocTable from "./TocTable";
 import ChapterProgress from "./ChapterProgress";
 import BookWizard from "./BookWizard";
+import BookInfo from "./BookInfo";
 
 const STATUS_LABEL = {
   [STATUS.READY]: "✔ connected",
@@ -63,27 +64,28 @@ export default function App() {
   const isProfile = profileUsername != null;
   const ownUsername = user?.username || user?.display_name || "";
   const isOwnProfile = isProfile && !!user && profileUsername.toLowerCase() === ownUsername.toLowerCase();
-  const bookKey = location.pathname.match(/^\/book\/([^/]+)/)?.[1] || null;
-  const showLibrary = !isProfile && !bookKey;
-  const bookOpen = !!bookKey && active.file != null;
+  const infoKey = location.pathname.match(/^\/book\/([^/]+)/)?.[1] || null;
+  const readKey = location.pathname.match(/^\/read\/([^/]+)/)?.[1] || null;
+  const showLibrary = !isProfile && !infoKey && !readKey;
+  const bookOpen = !!readKey && active.file != null;
   const readerOpen = active.status === STATUS.READY && active.file != null;
 
-  // ── auto-reconnect when URL lands on /book/:key ───────────────────
+  // ── auto-reconnect when URL lands on /read/:slug ────────────────
   useEffect(() => {
-    if (!bookKey) return;
-    if (active.bookId === bookKey) return;
-    if (reconnectTriggeredRef.current === bookKey) return;
-    reconnectTriggeredRef.current = bookKey;
-    reconnect(bookKey).catch(() => {});
-  }, [bookKey, active.bookId, reconnect]);
+    if (!readKey) return;
+    if (active.bookId === readKey) return;
+    if (reconnectTriggeredRef.current === readKey) return;
+    reconnectTriggeredRef.current = readKey;
+    reconnect(readKey).catch(() => {});
+  }, [readKey, active.bookId, reconnect]);
 
-  // ── clear active book when navigating away from /book/:key ────────
+  // ── clear active book when navigating away from /read/:slug ─────
   useEffect(() => {
-    if (!bookKey && reconnectTriggeredRef.current) {
+    if (!readKey && reconnectTriggeredRef.current) {
       reconnectTriggeredRef.current = null;
       close();
     }
-  }, [bookKey, close]);
+  }, [readKey, close]);
 
   // ── boot ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -404,8 +406,11 @@ export default function App() {
             ))}
           </ul>
         </section>
+      ) : infoKey && !readKey ? (
+        /* ── Book info page (/book/:slug) ──────────────────────────── */
+        <BookInfo slug={infoKey} />
       ) : (
-        /* ── Reader view (/book/:key) ──────────────────────────────── */
+        /* ── Reader view (/read/:slug) ─────────────────────────────── */
         <div className="viewer-scene">
           <div className="reader-top" id="reader-toolbar-slot" />
           <div className="viewer-main">
@@ -426,7 +431,7 @@ export default function App() {
                 <div className="empty-state">
                   <h3>No file connected</h3>
                   <p>Select a PDF to start reading.</p>
-                  <button className="primary" onClick={() => reconnect(bookKey)}>Locate file…</button>
+                  <button className="primary" onClick={() => reconnect(readKey)}>Locate file…</button>
                 </div>
               )}
               {active.status === STATUS.LOADING && (
