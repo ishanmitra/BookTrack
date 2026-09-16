@@ -143,6 +143,18 @@ body {
 }
 .book-info-slug { font-family: monospace; }
 .book-info .primary { align-self: flex-start; margin-top: 8px; }
+.activity-nudge {
+  background: var(--panel);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+.activity-nudge p { margin: 0; font-size: 13px; color: var(--muted); }
 .library .hint { color: var(--muted); font-size: 13px; margin: 8px 0; }
 .library-list .library-item { cursor: pointer; transition: border-color 0.15s; }
 .library-item:hover { border-color: var(--accent); }

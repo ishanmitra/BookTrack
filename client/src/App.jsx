@@ -478,6 +478,12 @@ export default function App() {
                   <button onClick={closePanel}>✕</button>
                 </div>
                 <div className="drawer-body">
+                  {!user && (
+                    <div className="activity-nudge">
+                      <p>Sign in with your GitHub account to start tracking reading sessions and commit progress.</p>
+                      <button className="primary" onClick={() => api.signIn()}>Sign in with GitHub</button>
+                    </div>
+                  )}
                   <div className="book-overview">
                     <div className="meta-line"><span>Title</span><b>{meta?.title || "—"}</b></div>
                     <div className="meta-line"><span>Author</span><b>{meta?.author || "—"}</b></div>
@@ -506,6 +512,7 @@ export default function App() {
                   <button onClick={closePanel}>✕</button>
                 </div>
                 <div className="drawer-body">
+                  {user?.is_admin && (
                   <section className="panel settings-section">
                     <h2>Book metadata</h2>
                     <div className="meta-grid">
@@ -526,7 +533,9 @@ export default function App() {
                       <button onClick={() => saveMeta({})} disabled={!metaDirty}>Save</button>
                     </div>
                   </section>
+                  )}
 
+                  {user?.is_admin && (
                   <section className="panel settings-section toc-panel">
                     <h2>Table of contents <span className="muted">(edit chapter start pages)</span></h2>
                     <TocTable rows={chapterRows} onChange={updateChapter} onRemove={removeChapter} onAdd={addChapter} onInsert={insertChapter} />
@@ -535,6 +544,7 @@ export default function App() {
                       {tocDirty && <button onClick={() => saveMeta({})}>Save TOC</button>}
                     </div>
                   </section>
+                  )}
 
                   <section className="panel settings-section danger-zone">
                     <h2>Danger zone</h2>
@@ -557,10 +567,12 @@ export default function App() {
                         }}
                       >Remove Stats</button>
                     </div>
+                    {user?.is_admin && (
                     <div className="danger-row">
                       <span>Forget Book — permanently delete the book and all progress.</span>
                       <button className="danger" onClick={() => handleForget(active.bookId)}>Forget Book</button>
                     </div>
+                    )}
                   </section>
                 </div>
                 </>
