@@ -105,7 +105,7 @@ export async function flattenOutline(pdf) {
   return rows;
 }
 
-export default forwardRef(function PdfReader({ file, book, onSessionEnd, onPagesKnown, onClose }, ref) {
+export default forwardRef(function PdfReader({ file, book, onSessionEnd, onPagesKnown, onClose, signedIn, onNotice }, ref) {
   const scrollRef = useRef(null);
   const pdfRef = useRef(null);
   const sessionRef = useRef(null);
@@ -181,6 +181,10 @@ export default forwardRef(function PdfReader({ file, book, onSessionEnd, onPages
   }, []);
 
   const startSession = useCallback(() => {
+    if (!signedIn) {
+      onNotice?.("Sign in to start a reading session");
+      return;
+    }
     const s = sessionRef.current;
     if (s && s.paused) {
       delete s.paused;
@@ -194,7 +198,7 @@ export default forwardRef(function PdfReader({ file, book, onSessionEnd, onPages
     setSessionStats({ seconds: 0, read: 0 });
     storage.saveSession(sessionRef.current).catch(() => {});
     setSessionState("running");
-  }, []);
+  }, [signedIn, onNotice]);
 
   const markCurrent = useCallback(
     (n) => {

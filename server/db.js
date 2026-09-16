@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -83,9 +84,12 @@ const q = {
   ),
   listCommitsForUser: db.prepare("SELECT * FROM commits WHERE book_id = ? AND user_id = ? ORDER BY ended_at"),
   deleteCommitsForUser: db.prepare("DELETE FROM commits WHERE book_id = ? AND user_id = ?"),
-  getUserByKey: db.prepare("SELECT * FROM users WHERE user_key = ?"),
-  getUser: db.prepare("SELECT * FROM users WHERE id = ?"),
-  insertUser: db.prepare("INSERT INTO users (user_key, created_at) VALUES (?, ?)"),
+  getUserById: db.prepare("SELECT * FROM users WHERE id = ?"),
+  getUserByGithubId: db.prepare("SELECT * FROM users WHERE github_id = ?"),
+  insertGithubUser: db.prepare(
+    "INSERT INTO users (user_key, display_name, avatar_url, github_id, is_admin, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+  ),
+  updateGithubUser: db.prepare("UPDATE users SET display_name = ?, avatar_url = ?, is_admin = ? WHERE id = ?"),
   deleteBook: db.prepare("DELETE FROM books WHERE id = ?"),
 };
 
@@ -151,24 +155,32 @@ export function deleteBook(id) {
   return q.deleteBook.run(id).changes > 0;
 }
 
-export function getOrCreateUser(userKey) {
-  if (!userKey) return null;
-  const existing = q.getUserByKey.get(userKey);
-  if (existing) return existing;
-  const info = q.insertUser.run(userKey, isoNow());
-  return q.getUser.get(info.lastInsertRowid);
+export function getUserById(id) {
+  return q.getUserById.get(id) ?? null;
 }
 
-export function userIdFor(userKey) {
-  if (!userKey) return null;
-  return q.getUserByKey.get(userKey)?.id ?? null;
+export function getOrCreateGithubUser({ githubId, displayName, avatarUrl, isAdmin }) {
+  const existing = q.getUserByGithubId.get(githubId);
+  if (existing) {
+    q.updateGithubUser.run(displayName ?? existing.display_name, avatarUrl ?? existing.avatar_url, isAdmin ? 1 : 0, existing.id);
+    return q.getUserById.get(existing.id);
+  }
+  const info = q.insertGithubUser.run(
+    randomUUID(),
+    displayName ?? null,
+    avatarUrl ?? null,
+    githubId,
+    isAdmin ? 1 : 0,
+    isoNow()
+  );
+  return q.getUserById.get(info.lastInsertRowid);
 }
 
 export function insertCommit(bookId, { userId, sessionId, deviceId, startedAt, endedAt, minutes, pages, readPages }) {
-  const user = getOrCreateUser(userId);
+  if (!userId) throw new Error("userId required");
   const id = q.insertCommit.run(
     bookId,
-    user?.id ?? null,
+    userId,
     sessionId,
     deviceId,
     startedAt,
@@ -181,14 +193,12 @@ export function insertCommit(bookId, { userId, sessionId, deviceId, startedAt, e
   return parseCommit(db.prepare("SELECT * FROM commits WHERE id = ?").get(id));
 }
 
-export function listCommits(bookId, userKey) {
-  const userId = userIdFor(userKey);
+export function listCommits(bookId, userId) {
   if (!userId) return [];
   return q.listCommitsForUser.all(bookId, userId).map(parseCommit);
 }
 
-export function deleteBookCommits(bookId, userKey) {
-  const userId = userIdFor(userKey);
+export function deleteBookCommits(bookId, userId) {
   if (!userId) return 0;
   return q.deleteCommitsForUser.run(bookId, userId).changes;
 }

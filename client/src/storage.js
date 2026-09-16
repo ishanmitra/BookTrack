@@ -116,15 +116,6 @@ export function getDeviceId() {
   return id;
 }
 
-export function getUserId() {
-  let id = localStorage.getItem("book-tracker:user");
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem("book-tracker:user", id);
-  }
-  return id;
-}
-
 const LAST_PAGE_KEY = "book-tracker:lastpage";
 
 export function getLastPage(fingerprint) {

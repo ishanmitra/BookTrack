@@ -62,17 +62,24 @@ Client (IndexedDB `book-tracker`):
 - `sessions` — current in-progress session snapshot (crash recovery)
 - `thumbnails` — page-1 cover previews (key = bookId, value `{bookId, dataUrl}`), shown on home library items
 LocalStorage: `book-tracker:meta` (bookId → {title, fingerprint, fileKey, serverId}),
-`book-tracker:device` (deviceId UUID).
+`book-tracker:device` (deviceId UUID). Identity is NOT stored locally — it comes
+from the server's `bt_session` cookie via `GET /api/auth/me`.
 
 ## API
 
 - `GET /api/books`, `GET /api/books/:id`
 - `POST /api/books` `{fingerprint, title?, author?, pageCount?}` — upsert by fingerprint
 - `PATCH /api/books/:id` `{title?, author?, edition?, pageCount?, toc?, exercises?}`
-- `DELETE /api/books/:id` — removes the book + its commits (`ON DELETE CASCADE`)
-- `DELETE /api/books/:id/commits` — removes only the commits (stats) for a book
-- `POST /api/books/:id/commits` `{sessionId?, deviceId, startedAt, endedAt, secondsPerPage, readPages}`
-- `GET /api/books/:id/commits`
+- `DELETE /api/books/:id` — removes the book + its commits (`ON DELETE CASCADE`); admin only (session user with `is_admin`, or `x-admin-key` == `ADMIN_TOKEN`)
+- `DELETE /api/books/:id/commits` — removes **your own** commits (stats) for a book
+- `POST /api/books/:id/commits` `{sessionId?, deviceId, startedAt, endedAt, secondsPerPage, readPages}` — authenticated session required
+- `GET /api/books/:id/commits` — your own commits only
+- `GET /api/auth/github` — redirect to GitHub authorize (client_id, scope `read:user`, random `state`)
+- `GET /api/auth/github/callback` — exchange code → upsert `users` by `github_id` → set httpOnly `bt_session` cookie → redirect
+- `GET /api/auth/me` → `{user: {id, display_name, avatar_url, is_admin} | null}`
+- `POST /api/auth/logout`
+- Optional `API_KEY`: when set, every `/api` request must send the matching `x-api-key` header.
+- **Commits are never anonymous:** every commit endpoint is behind `auth.requireAuth`; the user is derived from the session cookie, and any client-declared identity is ignored. `PdfReader`'s Start session is gated on being signed in.
 
 ## How reading tracking works (PdfReader)
 
@@ -188,6 +195,13 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
   `node index.js`/`vite` processes.
 - Relocating a missing file that is a *different edition* (new fingerprint)
   creates a new catalog record; the old record remains.
+- **Auth sessions are in-memory** (`server/auth.js` `sessions` map). Restarting
+  the server signs everyone out — this is expected in dev; production will need
+  a persistent session store (or signed stateless tokens). Cookie `bt_session` is
+  httpOnly, `SameSite=Lax`, 30-day expiry. GitHub OAuth uses a random `state`
+  with a 10-minute expiry to prevent CSRF; the callback URL must be
+  `<host>/api/auth/github/callback` (in dev it routes through the Vite `/api`
+  proxy on `:5173`).
 - **Commits' JSON columns must be parsed server-side.** SQLite stores `pages`
   /`read_pages` as TEXT; `listCommits`/`insertCommit` must go through
   `parseCommit` (JSON.parse), or the client receives strings and
@@ -234,6 +248,14 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
   Collapse view groups 25-page chunks; ±100/«/All range zoom handles ~1000-page
   books. Page count comes from `PdfReader` via `onPagesKnown` (falls back to
   server `page_count`).
+- GitHub OAuth sign-in (`/api/auth/github` flow, `users` upsert by `github_id`,
+  httpOnly `bt_session` cookie, `/api/auth/me` + logout). Reading commits now
+  require being signed in: `PdfReader`'s Start session is gated on the session,
+  all commit endpoints are behind `auth.requireAuth`, and the server derives the
+  user from the cookie — no client-supplied identity is accepted. Delete book
+  allows admin via session (`user.is_admin`) in addition to the `x-admin-key`
+  header. Sessions are in-memory (`server/auth.js` map); server restart signs
+  everyone out (harmless, devs just re-login).
 - Bug fixes: TDZ hook order (blank page), sidebar not updating on book add,
   keyboard listener stealing form input.
 

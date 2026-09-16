@@ -44,6 +44,7 @@ export default function App() {
   const [pausedSession, setPausedSession] = useState(null);
   const [thumbs, setThumbs] = useState({});
   const [thumbData, setThumbData] = useState(null);
+  const [user, setUser] = useState(null);
   const activeBookIdRef = useRef(null);
   const readerRef = useRef(null);
 
@@ -56,6 +57,10 @@ export default function App() {
         setThumbs(m);
       })
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    api.me().then((r) => setUser(r.user)).catch(() => {});
   }, []);
 
   const visibleCommits = useMemo(
@@ -275,7 +280,18 @@ export default function App() {
               <h1>📚 BookTrack</h1>
               <span className="tagline">git-style reading progress for technical books</span>
             </div>
-            <button className="primary" onClick={() => pick()} disabled={active.status === STATUS.WIZARD}>+ Add a book</button>
+            <div className="library-user">
+              {user ? (
+                <>
+                  {user.avatar_url && <img className="user-avatar" src={user.avatar_url} alt="" />}
+                  <span className="user-name">{user.display_name}</span>
+                  <button className="ghost" onClick={() => api.logout().then(() => setUser(null))}>Sign out</button>
+                </>
+              ) : (
+                <button className="primary" onClick={() => api.signIn()}>Sign in with GitHub</button>
+              )}
+              <button className="primary" onClick={() => pick()} disabled={active.status === STATUS.WIZARD}>+ Add a book</button>
+            </div>
           </header>
           {supportsFileSystem === false && (
             <p className="hint">Your browser lacks the File System Access API — use Chrome/Edge/Safari.</p>
@@ -325,6 +341,8 @@ export default function App() {
               onSessionEnd={handleSessionEnd}
               onPagesKnown={setPageCount}
               onClose={close}
+              signedIn={!!user}
+              onNotice={setNotice}
             />
           ) : (
             <div className="reader error-backdrop">
