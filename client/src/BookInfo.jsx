@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "./api";
 
-export default function BookInfo({ slug }) {
+export default function BookInfo({ slug, thumb }) {
   const navigate = useNavigate();
   const [book, setBook] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -45,6 +45,7 @@ export default function BookInfo({ slug }) {
     <section className="book-info">
       <div className="book-info-card">
         <button className="ghost" onClick={() => navigate("/")}>← Library</button>
+        {thumb && <img className="book-info-cover" src={thumb} alt="" />}
         <h1 className="book-info-title">{book.title}</h1>
         <p className="book-info-author">{book.author}</p>
         <div className="book-info-meta">

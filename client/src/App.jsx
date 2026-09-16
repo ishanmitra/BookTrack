@@ -412,7 +412,7 @@ export default function App() {
         </section>
       ) : infoKey && !readKey ? (
         /* ── Book info page (/book/:slug) ──────────────────────────── */
-        <BookInfo slug={infoKey} />
+        <BookInfo slug={infoKey} thumb={thumbs[infoKey]} />
       ) : (
         /* ── Reader view (/read/:slug) ─────────────────────────────── */
         <div className="viewer-scene">
