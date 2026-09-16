@@ -157,10 +157,7 @@ body {
   gap: 8px 16px;
   color: var(--muted);
   font-size: 13px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border);
 }
-.book-info-slug { font-family: monospace; }
 .book-info .primary { align-self: flex-start; margin-top: 8px; }
 .activity-nudge {
   background: var(--panel);

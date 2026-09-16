@@ -53,7 +53,6 @@ export default function BookInfo({ slug, thumb }) {
             <div className="book-info-meta">
               {book.edition != null && <span>Edition {book.edition}</span>}
               {book.page_count != null && <span>{book.page_count} pages</span>}
-              <span className="book-info-slug">/{book.slug}</span>
             </div>
           </div>
         </div>
