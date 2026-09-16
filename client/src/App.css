@@ -339,7 +339,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 span.admin-tag {
   background: var(--purple);
   color: #fff !important;
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -350,7 +350,7 @@ span.admin-tag {
   vertical-align: middle;
   white-space: nowrap;
 }
-.danger-row .admin-tag { font-size: 12px; }
+.danger-row .admin-tag { font-size: 9px; }
 .danger-row.admin-forget { background: rgba(163, 113, 247, 0.06); }
 
 .panel {
