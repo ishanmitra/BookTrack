@@ -336,10 +336,11 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   border-color: var(--purple);
   border-style: dashed;
 }
-.admin-tag {
+span.admin-tag {
   background: var(--purple);
-  color: #fff;
-  font-size: 10px;
+  color: #fff !important;
+  font-size: 12px;
+  line-height: 1;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   border-radius: 8px;
@@ -347,6 +348,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   margin-left: 8px;
   font-weight: 600;
   vertical-align: middle;
+  white-space: nowrap;
 }
 .danger-row.admin-forget { background: rgba(163, 113, 247, 0.06); }
 
