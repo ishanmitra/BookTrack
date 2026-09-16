@@ -113,6 +113,7 @@ export default function App() {
 
   // ── commits / queue ───────────────────────────────────────────────
   const loadCommits = useCallback(async (bookId) => {
+    if (!user) { setCommits([]); return; }
     if (!bookId) return;
     setCommitsLoading(true);
     try {
@@ -122,7 +123,7 @@ export default function App() {
     } finally {
       setCommitsLoading(false);
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     if (active.book?.id) {
