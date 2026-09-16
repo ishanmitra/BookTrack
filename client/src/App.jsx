@@ -567,7 +567,7 @@ export default function App() {
                     </div>
                     {user?.is_admin && (
                     <div className="danger-row admin-forget">
-                      <span>Forget Book — permanently delete the book and all progress.</span>
+                      <span>Forget Book — permanently delete the book and all progress. <span className="admin-tag">admin</span></span>
                       <button className="danger" onClick={() => handleForget(active.bookId)}>Forget Book</button>
                     </div>
                     )}

@@ -348,7 +348,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   font-weight: 600;
   vertical-align: middle;
 }
-.danger-row.admin-forget { background: rgba(163, 113, 247, 0.06); border-radius: 6px; }
+.danger-row.admin-forget { background: rgba(163, 113, 247, 0.06); }
 
 .panel {
   background: var(--panel);
