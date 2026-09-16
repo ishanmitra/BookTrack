@@ -70,7 +70,7 @@ from the server's `bt_session` cookie via `GET /api/auth/me`.
 - `GET /api/books`, `GET /api/books/:id`
 - `POST /api/books` `{fingerprint, title?, author?, pageCount?}` — upsert by fingerprint
 - `PATCH /api/books/:id` `{title?, author?, edition?, pageCount?, toc?, exercises?}`
-- `DELETE /api/books/:id` — removes the book + its commits (`ON DELETE CASCADE`); admin only (session user with `is_admin`, or `x-admin-key` == `ADMIN_TOKEN`)
+- `DELETE /api/books/:id` — removes the book + its commits (`ON DELETE CASCADE`); admin session user only (`is_admin`)
 - `DELETE /api/books/:id/commits` — removes **your own** commits (stats) for a book
 - `POST /api/books/:id/commits` `{sessionId?, deviceId, startedAt, endedAt, secondsPerPage, readPages}` — authenticated session required
 - `GET /api/books/:id/commits` — your own commits only
@@ -252,10 +252,11 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
   httpOnly `bt_session` cookie, `/api/auth/me` + logout). Reading commits now
   require being signed in: `PdfReader`'s Start session is gated on the session,
   all commit endpoints are behind `auth.requireAuth`, and the server derives the
-  user from the cookie — no client-supplied identity is accepted. Delete book
-  allows admin via session (`user.is_admin`) in addition to the `x-admin-key`
-  header. Sessions are in-memory (`server/auth.js` map); server restart signs
-  everyone out (harmless, devs just re-login).
+  user from the cookie — no client-supplied identity is accepted. Book deletion
+  is admin-only via the session (`user.is_admin` derived from `GITHUB_ADMIN_IDS`;
+  there is deliberately no admin key/token — a client-bundled admin secret is
+  extractable by anyone). Sessions are in-memory (`server/auth.js` map); server
+  restart signs everyone out (harmless, devs just re-login).
 - Bug fixes: TDZ hook order (blank page), sidebar not updating on book add,
   keyboard listener stealing form input.
 

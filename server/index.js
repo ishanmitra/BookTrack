@@ -11,7 +11,6 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "2mb" }));
 
 const API_KEY = process.env.API_KEY;
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 const GH_CLIENT_ID = process.env.GITHUB_CLIENT_ID;
 const GH_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET;
 const ADMIN_GITHUB_IDS = (process.env.GITHUB_ADMIN_IDS || "")
@@ -113,9 +112,8 @@ app.patch("/api/books/:id", (req, res) => {
 });
 
 app.delete("/api/books/:id", (req, res) => {
-  const viaKey = ADMIN_TOKEN && req.get("x-admin-key") === ADMIN_TOKEN;
-  const viaSession = auth.currentUser(req)?.is_admin;
-  if (!viaKey && !viaSession) return res.status(403).json({ error: "admin required" });
+  const user = auth.currentUser(req);
+  if (!user?.is_admin) return res.status(403).json({ error: "admin required" });
   if (!db.deleteBook(Number(req.params.id))) return res.status(404).json({ error: "book not found" });
   res.json({ ok: true });
 });
