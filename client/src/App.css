@@ -78,8 +78,11 @@ body {
   font-size: 13px;
   cursor: pointer;
   width: 100%;
+  text-decoration: none;
+  display: block;
 }
 .user-menu-name { font-weight: 600; }
+.user-menu-name:hover,
 .user-menu-item:hover { background: var(--border); }
 
 /* Profile */
@@ -307,8 +310,7 @@ body {
 button,
 a.ghost,
 a.primary,
-a.active-link,
-a.user-menu-name {
+a.active-link {
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--border);
@@ -323,7 +325,7 @@ a.user-menu-name {
   font-family: inherit;
   line-height: inherit;
 }
-button:hover, a.ghost:hover, a.primary:hover, a.active-link:hover, a.user-menu-name:hover { border-color: var(--muted); }
+button:hover, a.ghost:hover, a.primary:hover, a.active-link:hover { border-color: var(--muted); }
 button.primary, a.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button.danger { color: var(--red); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
