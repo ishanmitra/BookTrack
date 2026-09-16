@@ -53,7 +53,7 @@ book-tracker/
 ## Data model
 
 Server (SQLite, `server/../data/reader.db`):
-- `books(id, fingerprint UNIQUE, title, author, edition, page_count, toc JSON, exercises JSON, created_at)`
+- `books(id, fingerprint UNIQUE, title, author, edition, page_count, toc JSON, exercises JSON, slug UNIQUE, created_at)`
 - `commits(id, book_id, session_id, device_id, started_at, ended_at, minutes, pages JSON {page:secs}, read_pages JSON [n], created_at)`
 
 Client (IndexedDB `book-tracker`):
@@ -67,9 +67,9 @@ from the server's `bt_session` cookie via `GET /api/auth/me`.
 
 ## API
 
-- `GET /api/books`, `GET /api/books/:id`
-- `POST /api/books` `{fingerprint, title?, author?, pageCount?}` — upsert by fingerprint
-- `PATCH /api/books/:id` `{title?, author?, edition?, pageCount?, toc?, exercises?}`
+- `GET /api/books`, `GET /api/books/:id`, `GET /api/book/:slug`
+- `POST /api/books` `{fingerprint, title?, author?, pageCount?, slug?}` — upsert by fingerprint. Slug is slugified (lowercase, dashes) and auto-deduped (`-2`, `-3`, …) against a UNIQUE index; if omitted it's derived from the title. Existing rows missing a slug get backfilled.
+- `PATCH /api/books/:id` `{title?, author?, edition?, pageCount?, toc?, exercises?, slug?}` — a provided slug is deduped against other books; `null`/empty keeps/regenerates the current one
 - `DELETE /api/books/:id` — removes the book + its commits (`ON DELETE CASCADE`); admin session user only (`is_admin`)
 - `DELETE /api/books/:id/commits` — removes **your own** commits (stats) for a book
 - `POST /api/books/:id/commits` `{sessionId?, deviceId, startedAt, endedAt, secondsPerPage, readPages}` — authenticated session required
@@ -271,6 +271,20 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
   for any non-`/api` GET route so browser refresh works on nested routes
   (dev refresh still flows through the Vite proxy; the fallback only matters
   when serving via the Express server).
+- **Book slugs (migration v3)**: `books.slug` UNIQUE (plain column + named
+  unique index, since SQLite can't `ADD COLUMN` a UNIQUE constraint). Slug
+  generation lives server-side (`db.slugify`/`db.uniqueSlug`): lowercase,
+  diacritics stripped, non-alphanumerics → `-`, truncated to 60 chars, `-2`/`-3`
+  auto-dedupe on collision (exact lookup through the unique index — no
+  probabilistic structure needed). `POST /api/books` accepts an optional `slug`
+  (else derives from title); `PATCH` dedupes against other books but keeps its
+  own; legacy rows are backfilled on next register. New `GET /api/book/:slug`
+  resolves the catalog record — the future `/book/:slug` info-page identity
+  that survives delete/reupload (content-addressed), unlike a numeric id.
+  Client: `BookWizard` has an auto-suggested (live from title, editable,
+  normalized on input) slug field with a `/book/…` preview; the slug is saved to
+  local meta alongside `serverId` and re-persisted on any metadata save; a slug
+  field was also added to the Settings drawer.
 
 ## Not built yet (next steps)
 

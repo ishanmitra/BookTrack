@@ -125,8 +125,8 @@ export default function App() {
   useEffect(() => {
     if (active.book?.id) {
       activeBookIdRef.current = active.book.id;
-      setMeta({ title: active.book.title, author: active.book.author, edition: active.book.edition });
-      setMetaBase({ title: active.book.title, author: active.book.author, edition: active.book.edition });
+      setMeta({ title: active.book.title, author: active.book.author, edition: active.book.edition, slug: active.book.slug });
+      setMetaBase({ title: active.book.title, author: active.book.author, edition: active.book.edition, slug: active.book.slug });
       setToc(Array.isArray(active.book.toc) ? active.book.toc : []);
       setTocDirty(false);
       setPageCount(null);
@@ -198,11 +198,11 @@ export default function App() {
     if (!clientId || !serverId) return;
     try {
       const updated = await api.updateBook(serverId, { ...meta, ...patch, toc });
-      setMeta({ title: updated.title, author: updated.author, edition: updated.edition });
-      setMetaBase({ title: updated.title, author: updated.author, edition: updated.edition });
+      setMeta({ title: updated.title, author: updated.author, edition: updated.edition, slug: updated.slug });
+      setMetaBase({ title: updated.title, author: updated.author, edition: updated.edition, slug: updated.slug });
       setToc(updated.toc);
       setTocDirty(false);
-      persistSavedMeta(clientId, { title: updated.title, author: updated.author, edition: updated.edition });
+      persistSavedMeta(clientId, { title: updated.title, author: updated.author, edition: updated.edition, slug: updated.slug });
     } catch (err) {
       setNotice(`Save failed: ${err.message}`);
     }
@@ -296,6 +296,7 @@ export default function App() {
   const metaDirty =
     (meta?.title ?? "") !== (metaBase?.title ?? "") ||
     (meta?.author ?? "") !== (metaBase?.author ?? "") ||
+    (meta?.slug ?? "") !== (metaBase?.slug ?? "") ||
     Number(meta?.edition ?? null) !== Number(metaBase?.edition ?? null);
   const bookTitle =
     meta?.title || active.book?.title || (storage.loadSavedMeta()[active.bookId] || {}).title || "Book";
@@ -488,6 +489,9 @@ export default function App() {
                       </label>
                       <label>Edition
                         <input type="number" min={1} value={meta?.edition ?? ""} onChange={(e) => setMeta((m) => ({ ...m, edition: Number(e.target.value) }))} />
+                      </label>
+                      <label>Slug
+                        <input value={meta?.slug ?? ""} onChange={(e) => setMeta((m) => ({ ...m, slug: e.target.value }))} />
                       </label>
                     </div>
                     <div className="meta-actions">

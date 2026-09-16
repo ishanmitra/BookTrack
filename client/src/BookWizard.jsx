@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { flattenOutline } from "./PdfReader";
+import { slugify } from "./slug";
 import TocTable from "./TocTable";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -28,6 +29,12 @@ export default function BookWizard({
   const [thumb, setThumb] = useState(null);
   const [thumbFailed, setThumbFailed] = useState(false);
   const [importMsg, setImportMsg] = useState("");
+  const [slugTouched, setSlugTouched] = useState(false);
+
+  // Auto-fill slug from title until the user edits it manually.
+  useEffect(() => {
+    if (!slugTouched) onMetaChange({ slug: slugify(meta?.title ?? "") });
+  }, [meta?.title, slugTouched]);
 
   useEffect(() => {
     let alive = true;
@@ -95,6 +102,18 @@ export default function BookWizard({
               <label>
                 Title
                 <input value={meta?.title || ""} onChange={(e) => onMetaChange({ title: e.target.value })} />
+              </label>
+              <label>
+                Slug
+                <input
+                  value={meta?.slug ?? ""}
+                  onChange={(e) => {
+                    setSlugTouched(true);
+                    onMetaChange({ slug: slugify(e.target.value) });
+                  }}
+                  onBlur={(e) => onMetaChange({ slug: slugify(e.target.value) })}
+                />
+                <small className="muted">/book/{meta?.slug || "…"}</small>
               </label>
               <label>
                 Author

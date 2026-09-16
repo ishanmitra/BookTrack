@@ -73,7 +73,7 @@ export function useLocalBook() {
   const register = useCallback(async (file, bookId) => {
     const fingerprint = await fingerprintFile(file);
     const book = await api.upsertBook({ fingerprint, title: baseName(file.name) });
-    storage.saveMetaFor(bookId, { title: book.title, fingerprint, fileKey: fileKeyOf(file), serverId: book.id });
+    storage.saveMetaFor(bookId, { title: book.title, fingerprint, fileKey: fileKeyOf(file), serverId: book.id, slug: book.slug });
     return book;
   }, []);
 

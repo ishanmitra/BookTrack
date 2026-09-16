@@ -102,16 +102,22 @@ app.get("/api/books/:id", (req, res) => {
   res.json(book);
 });
 
+app.get("/api/book/:slug", (req, res) => {
+  const book = db.parseBook(db.getBookBySlug(req.params.slug));
+  if (!book) return res.status(404).json({ error: "book not found" });
+  res.json(book);
+});
+
 app.post("/api/books", (req, res) => {
-  const { fingerprint, title, author, pageCount } = req.body ?? {};
+  const { fingerprint, title, author, pageCount, slug } = req.body ?? {};
   if (!fingerprint) return res.status(400).json({ error: "fingerprint required" });
-  const book = db.parseBook(db.upsertBook(fingerprint, { title, author, pageCount }));
+  const book = db.parseBook(db.upsertBook(fingerprint, { title, author, pageCount, slug }));
   res.json(book);
 });
 
 app.patch("/api/books/:id", (req, res) => {
-  const { title, author, edition, pageCount, toc, exercises } = req.body ?? {};
-  const book = db.parseBook(db.updateBook(Number(req.params.id), { title, author, edition, pageCount, toc, exercises }));
+  const { title, author, edition, pageCount, toc, exercises, slug } = req.body ?? {};
+  const book = db.parseBook(db.updateBook(Number(req.params.id), { title, author, edition, pageCount, toc, exercises, slug }));
   if (!book) return res.status(404).json({ error: "book not found" });
   res.json(book);
 });
