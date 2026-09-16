@@ -303,12 +303,13 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
   `migrateLegacyBookKeys()` on boot re-keys any leftover UUID-keyed data. The
   wizard's Save and slug edits navigate by the *final* slug returned by the
   server (not a possibly-stale client id).
-- **Book info page**: `/book/:slug` now renders `BookInfo.jsx` — a minimal page
-  showing title, author, edition, page count, slug, table of contents, and a
-  "Read on this device" button. The PDF reader lives at `/read/:slug` (auto-
-  reconnects on landing). Library item clicks and the wizard's Save navigate to
-  the info page; the reader closes back to the library. The `/api/book/:slug`
-  endpoint is public (no auth required).
+- **Book info page**: `/book/:slug` renders `BookInfo.jsx` — a minimal page
+  showing title, author, edition, page count, slug, and a "Read on this device"
+  button (TOC intentionally omitted for now). The PDF reader lives at
+  `/read/:slug` (auto-reconnects on landing). Library items have separate
+  **Open** (→ reader) and **Info** (→ info page) buttons; clicking the row
+  itself also opens the reader. The `/api/book/:slug` endpoint is public (no
+  auth required).
 
 ## Not built yet (next steps)
 
