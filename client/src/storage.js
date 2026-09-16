@@ -72,7 +72,8 @@ export async function saveThumbnail(bookId, dataUrl) {
   await idbPut("thumbnails", bookId, { bookId, dataUrl });
 }
 export async function getThumbnails() {
-  return (await idbGetAll("thumbnails")) || [];
+  const [values, keys] = await Promise.all([idbGetAll("thumbnails"), idbGetAllKeys("thumbnails")]);
+  return (values || []).map((v, i) => ({ key: keys?.[i], ...(v || {}) }));
 }
 export function getThumbnail(bookId) {
   return idbGet("thumbnails", bookId);
@@ -92,7 +93,7 @@ export async function rekeyBook(oldKey, newKey) {
   }
   const thumb = await idbGet("thumbnails", oldKey);
   if (thumb) {
-    await idbPut("thumbnails", newKey, thumb);
+    await idbPut("thumbnails", newKey, { ...thumb, bookId: newKey });
     await idbDelete("thumbnails", oldKey);
   }
   const all = loadSavedMeta();

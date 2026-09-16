@@ -95,7 +95,7 @@ export default function App() {
       .getThumbnails()
       .then((list) => {
         const m = {};
-        for (const t of list) if (t?.bookId) m[t.bookId] = t.dataUrl;
+        for (const t of list) if (t?.key) m[t.key] = t.dataUrl;
         setThumbs(m);
       })
       .catch(() => {});
