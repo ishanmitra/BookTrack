@@ -33,7 +33,7 @@ export default function App() {
   const navigate = useNavigate();
   const {
     saved, active, pick, reconnect, stopTracking, forget, removeStats,
-    close, beginReading, persistSavedMeta, supportsFileSystem,
+    close, beginReading, persistSavedMeta, renameBook, supportsFileSystem,
   } = useLocalBook();
 
   const [commits, setCommits] = useState([]);
@@ -198,11 +198,29 @@ export default function App() {
     if (!clientId || !serverId) return;
     try {
       const updated = await api.updateBook(serverId, { ...meta, ...patch, toc });
-      setMeta({ title: updated.title, author: updated.author, edition: updated.edition, slug: updated.slug });
-      setMetaBase({ title: updated.title, author: updated.author, edition: updated.edition, slug: updated.slug });
+      const nextSlug = updated.slug;
+      const prevSlug = metaBase?.slug;
+      let targetId = clientId;
+      if (nextSlug && prevSlug && nextSlug !== prevSlug) {
+        // The book was renamed: re-key all local state under the new slug and
+        // follow the new URL (after PATCH, active/bookId may be stale).
+        await renameBook(prevSlug, nextSlug);
+        targetId = nextSlug;
+        setThumbs((m) => {
+          if (!m[prevSlug]) return m;
+          const n = { ...m };
+          delete n[prevSlug];
+          n[nextSlug] = m[prevSlug];
+          return n;
+        });
+        navigate("/book/" + nextSlug);
+      }
+      setMeta({ title: updated.title, author: updated.author, edition: updated.edition, slug: nextSlug });
+      setMetaBase({ title: updated.title, author: updated.author, edition: updated.edition, slug: nextSlug });
       setToc(updated.toc);
       setTocDirty(false);
-      persistSavedMeta(clientId, { title: updated.title, author: updated.author, edition: updated.edition, slug: updated.slug });
+      persistSavedMeta(targetId, { title: updated.title, author: updated.author, edition: updated.edition, slug: nextSlug });
+      return updated;
     } catch (err) {
       setNotice(`Save failed: ${err.message}`);
     }
@@ -265,13 +283,14 @@ export default function App() {
   const handleWizardSave = async () => {
     const bookId = active.bookId;
     if (!bookId) return;
-    await saveMeta({});
+    const updated = await saveMeta({});
+    const finalSlug = updated?.slug || bookId;
     if (thumbData) {
-      try { await storage.saveThumbnail(bookId, thumbData); setThumbs((m) => ({ ...m, [bookId]: thumbData })); }
+      try { await storage.saveThumbnail(finalSlug, thumbData); setThumbs((m) => ({ ...m, [finalSlug]: thumbData })); }
       catch { console.error("thumbnail save failed"); }
     }
     beginReading();
-    navigate("/book/" + bookId);
+    navigate("/book/" + finalSlug);
   };
 
   // ── navigation helpers ────────────────────────────────────────────

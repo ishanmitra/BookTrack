@@ -74,8 +74,43 @@ export async function saveThumbnail(bookId, dataUrl) {
 export async function getThumbnails() {
   return (await idbGetAll("thumbnails")) || [];
 }
+export function getThumbnail(bookId) {
+  return idbGet("thumbnails", bookId);
+}
 export function deleteThumbnail(bookId) {
   return idbDelete("thumbnails", bookId);
+}
+
+// Move every piece of a book's local state (file handle, thumbnail, meta)
+// from one key to another. Used when a book's slug changes.
+export async function rekeyBook(oldKey, newKey) {
+  if (!oldKey || !newKey || oldKey === newKey) return;
+  const handle = await idbGet("handles", oldKey);
+  if (handle) {
+    await idbPut("handles", newKey, handle);
+    await idbDelete("handles", oldKey);
+  }
+  const thumb = await idbGet("thumbnails", oldKey);
+  if (thumb) {
+    await idbPut("thumbnails", newKey, thumb);
+    await idbDelete("thumbnails", oldKey);
+  }
+  const all = loadSavedMeta();
+  if (all[oldKey] && !all[newKey]) {
+    all[newKey] = { ...all[oldKey] };
+    delete all[oldKey];
+    localStorage.setItem(META_KEY, JSON.stringify(all));
+  }
+}
+
+// One-time upgrade: before slugs existed, books were keyed locally by a
+// random UUID while their real slug sat inside meta.slug. Move those rows to
+// the slug key so handles/thumbnails/meta and the URL all line up.
+export async function migrateLegacyBookKeys() {
+  const all = loadSavedMeta();
+  for (const [key, m] of Object.entries(all)) {
+    if (m && m.slug && key !== m.slug) await rekeyBook(key, m.slug);
+  }
 }
 
 const META_KEY = "book-tracker:meta";

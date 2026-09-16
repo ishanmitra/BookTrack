@@ -65,17 +65,32 @@ async function openHandle(handle, request) {
   }
 }
 
+// The canonical book identity is its server slug. Everything local (handles,
+// thumbnails, meta, the saved list, the /book/:slug URL, active state) is
+// keyed by that slug — there is no separate client-side UUID.
 export function useLocalBook() {
   const [saved, setSaved] = useState([]);
   const [active, setActive] = useState({ bookId: null, status: STATUS.IDLE, book: null, file: null, error: null });
   const activeRef = useRef(null);
 
-  const register = useCallback(async (file, bookId) => {
+  // Registers the file on the server (fingerprint-deduped) and returns the
+  // catalog record — no local state is written here.
+  const ensureRegistered = useCallback(async (file) => {
     const fingerprint = await fingerprintFile(file);
     const book = await api.upsertBook({ fingerprint, title: baseName(file.name) });
-    storage.saveMetaFor(bookId, { title: book.title, fingerprint, fileKey: fileKeyOf(file), serverId: book.id, slug: book.slug });
-    return book;
+    return { book, fingerprint };
   }, []);
+
+  const register = useCallback(
+    async (file, bookId) => {
+      const { book, fingerprint } = await ensureRegistered(file);
+      const nextId = book.slug;
+      if (nextId !== bookId) await storage.rekeyBook(bookId, nextId);
+      storage.saveMetaFor(nextId, { title: book.title, fingerprint, fileKey: fileKeyOf(file), serverId: book.id, slug: book.slug });
+      return { book, bookId: nextId };
+    },
+    [ensureRegistered]
+  );
 
   const setSavedEntry = useCallback((bookId, patch) => {
     setSaved((list) => {
@@ -88,6 +103,10 @@ export function useLocalBook() {
     });
   }, []);
 
+  const removeSavedEntry = useCallback((bookId) => {
+    setSaved((list) => list.filter((s) => s.bookId !== bookId));
+  }, []);
+
   const persistSavedMeta = useCallback(
     (bookId, patch) => {
       storage.saveMetaFor(bookId, patch);
@@ -96,7 +115,25 @@ export function useLocalBook() {
     [setSavedEntry]
   );
 
+  // Move a book (handle, thumbnail, meta, saved-list entry, active state) to
+  // a new slug after the user edits it.
+  const renameBook = useCallback(
+    async (oldId, newId) => {
+      if (!oldId || !newId || oldId === newId) return;
+      await storage.rekeyBook(oldId, newId);
+      setSaved((list) =>
+        list.map((s) => (s.bookId === oldId ? { ...s, bookId: newId, meta: storage.loadSavedMeta()[newId] || s.meta } : s))
+      );
+      setActive((a) => (a.bookId === oldId ? { ...a, bookId: newId } : a));
+      if (activeRef.current === oldId) activeRef.current = newId;
+    },
+    []
+  );
+
   const refreshSaved = useCallback(async () => {
+    // The handle store is the source of truth for "what's in my library" —
+    // Remove Book deletes only the handle while meta stays, and must not
+    // resurrect the book on refresh.
     const ids = await storage.listSavedBookIds();
     const meta = storage.loadSavedMeta();
     setSaved(ids.map((bookId) => ({ bookId, meta: meta[bookId] || {}, status: STATUS.LOADING })));
@@ -114,16 +151,18 @@ export function useLocalBook() {
       setSavedEntry(bookId, { meta, status: result.status, error: result.error });
       if (result.status !== STATUS.READY) return;
       try {
-        const book = await register(result.file, bookId);
-        setSavedEntry(bookId, { meta: storage.loadSavedMeta()[bookId] || {}, status: STATUS.READY });
+        const { book, bookId: nextId } = await register(result.file, bookId);
+        if (nextId !== bookId) removeSavedEntry(bookId);
+        setSavedEntry(nextId, { meta: storage.loadSavedMeta()[nextId] || {}, status: STATUS.READY });
         if (activeRef.current === bookId) {
-          setActive({ bookId, status: STATUS.READY, book, file: result.file, error: null });
+          activeRef.current = nextId;
+          setActive({ bookId: nextId, status: STATUS.READY, book, file: result.file, error: null });
         }
       } catch (err) {
         setSavedEntry(bookId, { meta, status: STATUS.ERROR, error: String(err) });
       }
     },
-    [register, setSavedEntry]
+    [register, setSavedEntry, removeSavedEntry]
   );
 
   const restoreOnBoot = useRef(new Set());
@@ -131,7 +170,11 @@ export function useLocalBook() {
   useEffect(() => {
     let alive = true;
     (async () => {
+      // Upgrade legacy UUID-keyed books to slug keys before anything reads state.
+      await storage.migrateLegacyBookKeys();
+      if (!alive) return;
       await refreshSaved();
+      if (!alive) return;
       const ids = await storage.listSavedBookIds();
       for (const bookId of ids) {
         if (!restoreOnBoot.current.has(bookId)) {
@@ -156,10 +199,13 @@ export function useLocalBook() {
       try {
         const handle = await pickHandle();
         const file = await handle.getFile();
-        const bookId = existingBookId || crypto.randomUUID();
+        // Register first so we know the slug to key local state under.
+        const { book, fingerprint } = await ensureRegistered(file);
+        const bookId = book.slug;
+        activeRef.current = bookId;
         await storage.saveBookHandle(bookId, handle);
-        storage.saveMetaFor(bookId, { fileName: file.name, fileKey: fileKeyOf(file) });
-        const book = await register(file, bookId);
+        storage.saveMetaFor(bookId, { title: book.title, fingerprint, fileKey: fileKeyOf(file), serverId: book.id, slug: book.slug });
+        if (existingBookId && existingBookId !== bookId) removeSavedEntry(existingBookId);
         setSavedEntry(bookId, { meta: storage.loadSavedMeta()[bookId] || {}, status: STATUS.READY });
         if (existingBookId) {
           setActive({ bookId, status: STATUS.READY, book, file, error: null });
@@ -174,7 +220,7 @@ export function useLocalBook() {
         setActive((a) => ({ ...a, status: STATUS.ERROR, error: String(err) }));
       }
     },
-    [register, setSavedEntry]
+    [ensureRegistered, setSavedEntry, removeSavedEntry]
   );
 
   const reconnect = useCallback(
@@ -190,14 +236,20 @@ export function useLocalBook() {
         return;
       }
       try {
-        const book = await register(result.file, bookId);
-        setSavedEntry(bookId, { status: STATUS.READY });
-        setActive({ bookId, status: STATUS.READY, book, file: result.file, error: null });
+        const { book, bookId: nextId } = await register(result.file, bookId);
+        if (nextId !== bookId) {
+          removeSavedEntry(bookId);
+          setSavedEntry(nextId, { meta: storage.loadSavedMeta()[nextId] || {}, status: STATUS.READY });
+          activeRef.current = nextId;
+        } else {
+          setSavedEntry(bookId, { status: STATUS.READY });
+        }
+        setActive({ bookId: nextId, status: STATUS.READY, book, file: result.file, error: null });
       } catch (err) {
         setActive({ bookId, status: STATUS.ERROR, book: null, file: null, error: String(err) });
       }
     },
-    [pick, register, setSavedEntry]
+    [pick, register, setSavedEntry, removeSavedEntry]
   );
 
   const stopTracking = useCallback(async (bookId) => {
@@ -241,5 +293,5 @@ export function useLocalBook() {
 
   const supportsFileSystem = hasFileSystemAccess();
 
-  return { saved, active, pick, reconnect, stopTracking, forget, removeStats, close, beginReading, persistSavedMeta, supportsFileSystem };
+  return { saved, active, pick, reconnect, stopTracking, forget, removeStats, close, beginReading, persistSavedMeta, renameBook, supportsFileSystem };
 }

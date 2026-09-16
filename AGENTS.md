@@ -56,14 +56,20 @@ Server (SQLite, `server/../data/reader.db`):
 - `books(id, fingerprint UNIQUE, title, author, edition, page_count, toc JSON, exercises JSON, slug UNIQUE, created_at)`
 - `commits(id, book_id, session_id, device_id, started_at, ended_at, minutes, pages JSON {page:secs}, read_pages JSON [n], created_at)`
 
-Client (IndexedDB `book-tracker`):
-- `handles` — persisted FileSystemFileHandle per bookId (reconnects file in later sessions)
+Client (IndexedDB `book-tracker`) — every book's local state is keyed by its **server slug** (the book's canonical, URL-safe identity; there is no separate client UUID):
+- `handles` — persisted FileSystemFileHandle per slug (reconnects file in later sessions)
 - `queue` — commits pending push (key = sessionId)
 - `sessions` — current in-progress session snapshot (crash recovery)
-- `thumbnails` — page-1 cover previews (key = bookId, value `{bookId, dataUrl}`), shown on home library items
-LocalStorage: `book-tracker:meta` (bookId → {title, fingerprint, fileKey, serverId}),
+- `thumbnails` — page-1 cover previews (key = slug, value `{bookId: slug, dataUrl}`), shown on home library items
+LocalStorage: `book-tracker:meta` (slug → {title, fingerprint, fileKey, serverId, slug}),
 `book-tracker:device` (deviceId UUID). Identity is NOT stored locally — it comes
 from the server's `bt_session` cookie via `GET /api/auth/me`.
+
+On boot `storage.migrateLegacyBookKeys()` re-keys any leftover UUID-keyed
+handles/thumbnails/meta to their `meta.slug` (one-time upgrade from before
+slugs existed). `storage.rekeyBook(old, new)` moves all local state when the
+slug changes (e.g. edited in Settings); the saved-list source of truth is the
+handle store so Remove Book (handle-only delete) can't resurrect on refresh.
 
 ## API
 
@@ -175,19 +181,19 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
 - **`setSavedEntry` adds OR updates** — new bookIds must be appended to the
   sidebar list, not only mapped over, or newly added books are invisible until
   reload.
-- **Metadata saves must also write localStorage, keyed by the CLIENT book id.**
-  The client uses two separate ids: the client UUID (`active.bookId`, key for
-  `handles`/localStorage meta/saved list/thumbs) and the SQLite row id
-  (`active.book.id` / `meta.serverId`, used for every `/api/books/:id` call).
-  `App.saveMeta` therefore performs the API update with `active.book.id` and
-  then calls `persistSavedMeta(active.bookId, …)` (`storage.saveMetaFor` + a
-  `setSavedEntry` re-read) under the **client** id only. Passing the server id
-  to `persistSavedMeta` breaks both ways at once: the real entry's title never
-  updates (meta lives under an id the list doesn't render) *and* `setSavedEntry`
-  appends a ghost entry (server id has no book handle) that vanishes on refresh
-  (boot list is built from handle keys only). `restore()` must also re-read
-  local meta *after* `register()` (which re-syncs the server title) instead of
-  using the pre-register snapshot, or boot shows stale titles.
+- **Metadata saves must also write localStorage, keyed by the book's server slug.**
+  Every book's local state (handle, meta, thumbs, saved-list entry, URL,
+  `active.bookId`) is keyed by the slug returned from the server. The only
+  other id is the numeric SQLite row id (`active.book.id` / `meta.serverId`,
+  used for every `/api/books/:id` call). `App.saveMeta` performs the API
+  update with `active.book.id` and then calls `persistSavedMeta(active.bookId, …)`
+  (`storage.saveMetaFor` + a `setSavedEntry` re-read) under the **slug** only.
+  When the slug changes, `renameBook(old, new)` re-keys handle/thumbnail/meta
+  and updates the saved list and active state; the handle store remains the
+  source of truth for refresh so Remove Book (handle-only delete) can't
+  resurrect. `restore()` must also re-read local meta *after* `register()`
+  (which re-syncs the server title) instead of using the pre-register
+  snapshot, or boot shows stale titles.
 - **Global key handling in PdfReader** must ignore events from interactive
   elements (`INPUT`/`TEXTAREA`/`SELECT`/`BUTTON`/contenteditable), otherwise
   space/arrows "steal" keystrokes from the metadata/TOC form fields.
@@ -285,6 +291,16 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
   normalized on input) slug field with a `/book/…` preview; the slug is saved to
   local meta alongside `serverId` and re-persisted on any metadata save; a slug
   field was also added to the Settings drawer.
+- **Slug is the single book identity; client UUID dropped.** `useLocalBook`
+  no longer generates `crypto.randomUUID()` per book — picking a PDF registers
+  it server-side first (`ensureRegistered` → `POST /api/books`) so the returned
+  slug is known *before* the file handle is saved, and every local store
+  (`handles`, `thumbnails`, `book-tracker:meta`, the saved list, the activated
+  book, and the `/book/:slug` URL) is keyed by that slug. `storage.rekeyBook`
+  + hook `renameBook` move all local state when a slug is edited, and a one-time
+  `migrateLegacyBookKeys()` on boot re-keys any leftover UUID-keyed data. The
+  wizard's Save and slug edits navigate by the *final* slug returned by the
+  server (not a possibly-stale client id).
 
 ## Not built yet (next steps)
 
