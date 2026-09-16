@@ -339,7 +339,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 span.admin-tag {
   background: var(--purple);
   color: #fff !important;
-  font-size: 10px;
+  font-size: 9px;
   line-height: 1;
   text-transform: uppercase;
   letter-spacing: 0.5px;
