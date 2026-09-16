@@ -300,7 +300,7 @@ export default function App() {
     reconnectTriggeredRef.current = s.bookId;
     if (statusForMeta(s) === STATUS.MISSING) pick(s.bookId);
     else reconnect(s.bookId);
-    navigate("/book/" + s.bookId);
+    navigate("/read/" + s.bookId);
   };
 
   const goToProfile = () => { navigate("/user/" + ownUsername); setMenuOpen(false); };
@@ -398,7 +398,10 @@ export default function App() {
                     ) : statusForMeta(s) === STATUS.PERMISSION || statusForMeta(s) === STATUS.ERROR ? (
                       <button onClick={(e) => { e.stopPropagation(); reconnect(s.bookId); }}>Reconnect</button>
                     ) : (
-                      <button className="primary" onClick={(e) => { e.stopPropagation(); reconnect(s.bookId); navigate("/book/" + s.bookId); }}>Open</button>
+                      <>
+                        <button className="ghost" onClick={(e) => { e.stopPropagation(); navigate("/book/" + s.bookId); }}>Info</button>
+                        <button className="primary" onClick={(e) => { e.stopPropagation(); reconnect(s.bookId); navigate("/read/" + s.bookId); }}>Open</button>
+                      </>
                     )}
                   </div>
                 </div>

@@ -142,8 +142,6 @@ body {
   border-bottom: 1px solid var(--border);
 }
 .book-info-slug { font-family: monospace; }
-.book-info-toc h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin: 8px 0; }
-.book-info-toc ol { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
 .book-info .primary { align-self: flex-start; margin-top: 8px; }
 .library .hint { color: var(--muted); font-size: 13px; margin: 8px 0; }
 .library-list .library-item { cursor: pointer; transition: border-color 0.15s; }

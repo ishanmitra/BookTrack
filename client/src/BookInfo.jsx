@@ -52,16 +52,6 @@ export default function BookInfo({ slug }) {
           {book.page_count != null && <span>{book.page_count} pages</span>}
           <span className="book-info-slug">/{book.slug}</span>
         </div>
-        {book.toc && book.toc.length > 0 && (
-          <div className="book-info-toc">
-            <h2>Chapters</h2>
-            <ol>
-              {book.toc.map((c, i) => (
-                <li key={i}>{c.title} <span className="muted">(p. {c.startPage})</span></li>
-              ))}
-            </ol>
-          </div>
-        )}
         <button className="primary" onClick={() => navigate("/read/" + slug)}>
           Read on this device
         </button>
