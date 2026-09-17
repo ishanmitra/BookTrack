@@ -20,7 +20,6 @@ CREATE TABLE IF NOT EXISTS books (
   edition INTEGER NOT NULL DEFAULT 1,
   page_count INTEGER,
   toc TEXT NOT NULL DEFAULT '[]',
-  exercises TEXT NOT NULL DEFAULT '[]',
   slug TEXT,
   created_at TEXT NOT NULL
 );
@@ -77,6 +76,13 @@ function migrate() {
     db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_books_slug ON books(slug)");
     db.pragma(`user_version = 3`, { simple: true });
   }
+  if (version < 4) {
+    // Exercises never shipped; drop the dead column entirely. Guarded so a
+    // fresh DB (exercises already absent from CREATE TABLE) skips cleanly.
+    const cols = db.pragma(`table_info(books)`).map((c) => c.name);
+    if (cols.includes("exercises")) db.exec("ALTER TABLE books DROP COLUMN exercises");
+    db.pragma(`user_version = 4`, { simple: true });
+  }
 }
 migrate();
 
@@ -92,7 +98,7 @@ const q = {
      VALUES (?, ?, ?, ?, ?, ?)`
   ),
   updateBook: db.prepare(
-    `UPDATE books SET title = ?, author = ?, edition = ?, page_count = ?, toc = ?, exercises = ?, slug = ?
+    `UPDATE books SET title = ?, author = ?, edition = ?, page_count = ?, toc = ?, slug = ?
      WHERE id = ?`
   ),
   insertCommit: db.prepare(
@@ -140,7 +146,7 @@ export function uniqueSlug(base, excludeId = null) {
 
 export function parseBook(row) {
   if (!row) return null;
-  return { ...row, toc: JSON.parse(row.toc), exercises: JSON.parse(row.exercises) };
+  return { ...row, toc: JSON.parse(row.toc) };
 }
 
 export function parseCommit(row) {
@@ -171,11 +177,11 @@ export function upsertBook(fingerprint, { title, author, pageCount, slug } = {})
     if (!existing.slug) {
       // Backfill a slug for rows created before migration v3.
       const backfill = slug ? uniqueSlug(slugify(slug), existing.id) : uniqueSlug(title ?? existing.title, existing.id);
-      q.updateBook.run(existing.title, existing.author, existing.edition, existing.page_count, existing.toc, existing.exercises, backfill, existing.id);
+      q.updateBook.run(existing.title, existing.author, existing.edition, existing.page_count, existing.toc, backfill, existing.id);
       return q.getBook.get(existing.id);
     }
     if (pageCount != null && existing.page_count == null) {
-      q.updateBook.run(existing.title, existing.author, existing.edition, pageCount, existing.toc, existing.exercises, existing.slug, existing.id);
+      q.updateBook.run(existing.title, existing.author, existing.edition, pageCount, existing.toc, existing.slug, existing.id);
       return q.getBook.get(existing.id);
     }
     return existing;
@@ -191,7 +197,7 @@ export function upsertBook(fingerprint, { title, author, pageCount, slug } = {})
   return q.getBook.get(info.lastInsertRowid);
 }
 
-export function updateBook(id, { title, author, edition, pageCount, toc, exercises, slug } = {}) {
+export function updateBook(id, { title, author, edition, pageCount, toc, slug } = {}) {
   const existing = q.getBook.get(id);
   if (!existing) return null;
   const nextTitle = title ?? existing.title;
@@ -205,7 +211,6 @@ export function updateBook(id, { title, author, edition, pageCount, toc, exercis
     edition ?? existing.edition,
     pageCount ?? existing.page_count,
     toc != null ? JSON.stringify(toc) : existing.toc,
-    exercises != null ? JSON.stringify(exercises) : existing.exercises,
     nextSlug,
     id
   );

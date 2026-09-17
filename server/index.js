@@ -116,8 +116,8 @@ app.post("/api/books", (req, res) => {
 });
 
 app.patch("/api/books/:id", (req, res) => {
-  const { title, author, edition, pageCount, toc, exercises, slug } = req.body ?? {};
-  const book = db.parseBook(db.updateBook(Number(req.params.id), { title, author, edition, pageCount, toc, exercises, slug }));
+  const { title, author, edition, pageCount, toc, slug } = req.body ?? {};
+  const book = db.parseBook(db.updateBook(Number(req.params.id), { title, author, edition, pageCount, toc, slug }));
   if (!book) return res.status(404).json({ error: "book not found" });
   res.json(book);
 });

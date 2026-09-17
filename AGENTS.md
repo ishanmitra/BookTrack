@@ -13,7 +13,7 @@ stores book **metadata** (fingerprint-keyed catalog) and reading **commits**
 - GitHub-like social/contribution layer: contribution heatmaps, per-book repos,
   follow readers, exercise/solution sharing.
 - Book catalog is a shared, community-curated metadata record (chapters/TOC,
-  exercises, latest edition), edited via a PR-like review/change flow.
+  latest edition), edited via a PR-like review/change flow.
 - Browser-extension bridge for reading off-platform (future).
 
 Key design answers already decided:
@@ -54,7 +54,7 @@ book-tracker/
 ## Data model
 
 Server (SQLite, `server/../data/reader.db`):
-- `books(id, fingerprint UNIQUE, title, author, edition, page_count, toc JSON, exercises JSON, slug UNIQUE, created_at)`
+- `books(id, fingerprint UNIQUE, title, author, edition, page_count, toc JSON, slug UNIQUE, created_at)`
 - `commits(id, book_id, session_id, device_id, started_at, ended_at, minutes, pages JSON {page:secs}, read_pages JSON [n], created_at)`
 
 Client (IndexedDB `book-tracker`) — every book's local state is keyed by its **server slug** (the book's canonical, URL-safe identity; there is no separate client UUID):
@@ -76,7 +76,7 @@ handle store so Remove Book (handle-only delete) can't resurrect on refresh.
 
 - `GET /api/books`, `GET /api/books/:id`, `GET /api/book/:slug`
 - `POST /api/books` `{fingerprint, title?, author?, pageCount?, slug?}` — upsert by fingerprint. Slug is slugified (lowercase, dashes) and auto-deduped (`-2`, `-3`, …) against a UNIQUE index; if omitted it's derived from the title. Existing rows missing a slug get backfilled.
-- `PATCH /api/books/:id` `{title?, author?, edition?, pageCount?, toc?, exercises?, slug?}` — a provided slug is deduped against other books; `null`/empty keeps/regenerates the current one
+- `PATCH /api/books/:id` `{title?, author?, edition?, pageCount?, toc?, slug?}` — a provided slug is deduped against other books; `null`/empty keeps/regenerates the current one
 - `DELETE /api/books/:id` — removes the book + its commits (`ON DELETE CASCADE`); admin session user only (`is_admin`)
 - `DELETE /api/books/:id/commits` — removes **your own** commits (stats) for a book
 - `POST /api/books/:id/commits` `{sessionId?, deviceId, startedAt, endedAt, secondsPerPage, readPages}` — authenticated session required
@@ -213,7 +213,7 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
   /`read_pages` as TEXT; `listCommits`/`insertCommit` must go through
   `parseCommit` (JSON.parse), or the client receives strings and
   `Object.entries(c.pages)` mangles them into per-character garbage (whole page
-  heatmap shows "no time"). `parseBook` already does this for `toc`/`exercises`.
+  heatmap shows "no time"). `parseBook` already does this for `toc`.
 
 ## Done so far (milestone 1: reading progress)
 
@@ -313,11 +313,13 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
 
 ## Not built yet (next steps)
 
-- Exercise metadata (auto-detect from PDF text; lazy add while reading) and the
-  exercise list in the UI.
-- Code committing for exercises: embedded editor (CodeMirror/Monaco) + commits,
-  and/or GitHub OAuth sync; per-book repos.
-- Commit-graph "git-like" timeline view (reading + code commits together).
-- Auth / multi-user; the catalog contribution/PR review flow for TOC/exercises.
+- Commit-graph "git-like" timeline view (reading commits drawn as a history).
+- Public profiles for other users; the catalog contribution/PR review flow for TOC.
 - Browser-extension bridge for off-platform reading.
 - Cross-edition dedup policy; smarter session thresholds; dark/light theming.
+- Parked (deliberately out of scope): the exercises/code-commit feature
+  (auto-detect page-named exercises from the PDF, embedded code editor, per-book
+  repos). It was dropped because its OAuth/editor/repo surface would dominate
+  early development for little initial value. The old `books.exercises` column
+  was removed in migration v4 for the same reason; if it ever returns it should
+  be a separate paginated `exercises` table, never an inline JSON column.
