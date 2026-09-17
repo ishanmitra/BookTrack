@@ -107,6 +107,11 @@ const q = {
   ),
   listCommitsForUser: db.prepare("SELECT * FROM commits WHERE book_id = ? AND user_id = ? ORDER BY ended_at"),
   deleteCommitsForUser: db.prepare("DELETE FROM commits WHERE book_id = ? AND user_id = ?"),
+  listUserCommits: db.prepare(
+    `SELECT c.*, b.title AS book_title, b.slug AS book_slug, b.fingerprint AS book_fingerprint, b.toc AS book_toc
+     FROM commits c JOIN books b ON b.id = c.book_id
+     WHERE c.user_id = ? ORDER BY c.ended_at DESC`
+  ),
   getUserById: db.prepare("SELECT * FROM users WHERE id = ?"),
   getUserByGithubId: db.prepare("SELECT * FROM users WHERE github_id = ?"),
   insertGithubUser: db.prepare(
@@ -274,4 +279,86 @@ export function listCommits(bookId, userId) {
 export function deleteBookCommits(bookId, userId) {
   if (!userId) return 0;
   return q.deleteCommitsForUser.run(bookId, userId).changes;
+}
+
+function distinctChapters(readPages, toc) {
+  const starts = (toc || []).map((t) => Number(t.startPage) || 0).filter((n) => n > 0).sort((a, b) => a - b);
+  if (!starts.length) return 0;
+  const seen = new Set();
+  for (const p of readPages || []) {
+    const n = Number(p) || 0;
+    if (!n) continue;
+    let i = starts.length - 1;
+    while (i >= 0 && starts[i] > n) i--;
+    if (i >= 0) seen.add(i);
+  }
+  return seen.size;
+}
+
+const parseToc = (raw) => {
+  try {
+    return JSON.parse(raw || "[]") || [];
+  } catch {
+    return [];
+  }
+};
+
+export function getUserStats(userId) {
+  if (!userId) return null;
+  const rows = q.listUserCommits.all(userId);
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6).getTime();
+  let today = { minutes: 0, pages: 0, chapters: 0 };
+  let week = { minutes: 0, pages: 0, chapters: 0 };
+  let totalMinutes = 0;
+  const byBook = new Map();
+  const sessions = [];
+  for (const r of rows) {
+    const c = parseCommit(r);
+    const toc = parseToc(r.book_toc);
+    const started = Date.parse(c.started_at) || now.getTime();
+    const mins = Number(c.minutes) || 0;
+    const pages = Array.isArray(c.read_pages) ? c.read_pages.length : 0;
+    const chapters = distinctChapters(c.read_pages, toc);
+    totalMinutes += mins;
+    if (started >= startOfToday) {
+      today.minutes += mins;
+      today.pages += pages;
+      today.chapters += chapters;
+    }
+    if (started >= startOfWeek) {
+      week.minutes += mins;
+      week.pages += pages;
+      week.chapters += chapters;
+    }
+    if (!byBook.has(c.book_id)) {
+      byBook.set(c.book_id, { book_id: c.book_id, slug: r.book_slug ?? null, title: r.book_title ?? null, fingerprint: r.book_fingerprint ?? null, minutes: 0, sessions: 0, last_read_at: null });
+    }
+    const row = byBook.get(c.book_id);
+    row.minutes += mins;
+    row.sessions += 1;
+    if (!row.last_read_at || c.ended_at > row.last_read_at) row.last_read_at = c.ended_at;
+    sessions.push({
+      id: c.id,
+      book_id: c.book_id,
+      slug: r.book_slug ?? null,
+      title: r.book_title ?? null,
+      fingerprint: r.book_fingerprint ?? null,
+      started_at: c.started_at,
+      ended_at: c.ended_at,
+      minutes: mins,
+      read_pages: c.read_pages || [],
+    });
+  }
+  const round = (n) => Math.round(n * 10) / 10;
+  today.minutes = round(today.minutes);
+  week.minutes = round(week.minutes);
+  return {
+    today,
+    week,
+    totalMinutes: round(totalMinutes),
+    books: [...byBook.values()],
+    sessions: sessions.slice(0, 10),
+  };
 }

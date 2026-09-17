@@ -28,6 +28,7 @@ const api = {
   deleteBook: (id) => request(`/api/books/${id}`, { method: "DELETE" }),
   deleteBookCommits: (id) => request(`/api/books/${id}/commits`, { method: "DELETE" }),
   getCommits: (id) => request(`/api/books/${id}/commits`),
+  meStats: () => request("/api/me/stats"),
   pushCommit: (id, commit) => request(`/api/books/${id}/commits`, { method: "POST", body: JSON.stringify(commit) }),
 };
 

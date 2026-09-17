@@ -148,6 +148,11 @@ app.post("/api/books/:id/commits", auth.requireAuth, (req, res) => {
   res.status(201).json(commit);
 });
 
+// Stats across the signed-in user's own commits
+app.get("/api/me/stats", auth.requireAuth, (req, res) => {
+  res.json(db.getUserStats(req.user.id));
+});
+
 app.get("/api/books/:id/commits", auth.requireAuth, (req, res) => {
   res.json(db.listCommits(Number(req.params.id), req.user.id));
 });

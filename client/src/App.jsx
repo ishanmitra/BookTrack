@@ -29,6 +29,37 @@ function fmtClock(totalSeconds) {
   return `${pad(Math.floor(totalSeconds / 3600))}:${pad(Math.floor((totalSeconds % 3600) / 60))}:${pad(totalSeconds % 60)}`;
 }
 
+function fmtMins(minutes) {
+  const m = Math.floor(Number(minutes) || 0);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+}
+
+function timeAgo(iso) {
+  if (!iso) return "";
+  const s = Math.floor((Date.now() - Date.parse(iso)) / 1000);
+  if (!Number.isFinite(s) || s < 0) return "just now";
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+function StatView({ s }) {
+  return (
+    <div className="stat-row">
+      <div className="stat-cell"><strong>{Math.floor(Number(s.minutes) || 0)}</strong><span>min</span></div>
+      <div className="stat-cell"><strong>{Math.floor(Number(s.pages) || 0)}</strong><span>pages</span></div>
+      <div className="stat-cell"><strong>{Math.floor(Number(s.chapters) || 0)}</strong><span>chapters</span></div>
+    </div>
+  );
+}
+
 export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -53,6 +84,7 @@ export default function App() {
   const [thumbs, setThumbs] = useState({});
   const [thumbData, setThumbData] = useState(null);
   const [user, setUser] = useState(null);
+  const [stats, setStats] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
   const activeBookIdRef = useRef(null);
@@ -91,6 +123,17 @@ export default function App() {
   useEffect(() => {
     api.me().then((r) => setUser(r.user)).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!user) { setStats(null); return; }
+    api.meStats().then(setStats).catch(() => {});
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || !showLibrary) return;
+    api.meStats().then(setStats).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, user]);
 
   useEffect(() => {
     storage
@@ -321,6 +364,28 @@ export default function App() {
   const bookTitle =
     meta?.title || active.book?.title || (storage.loadSavedMeta()[active.bookId] || {}).title || "Book";
 
+  // ── home revamp data ──────────────────────────────────────────────
+  const sessionsBySlug = useMemo(() => {
+    const m = {};
+    for (const s of stats?.sessions || []) if (!m[s.slug]) m[s.slug] = s;
+    return m;
+  }, [stats]);
+
+  const recency = useMemo(() => {
+    const m = {};
+    for (const b of stats?.books || []) m[b.slug] = Date.parse(b.last_read_at) || 0;
+    return m;
+  }, [stats]);
+
+  const orderedSaved = useMemo(
+    () => [...saved].sort((a, b) => (recency[b.bookId] || 0) - (recency[a.bookId] || 0)),
+    [saved, recency]
+  );
+
+  const resumeSession = (stats?.sessions || []).find((s) => saved.some((x) => x.bookId === s.slug)) || null;
+  const resumePage = resumeSession ? storage.getLastPage(resumeSession.fingerprint) : 1;
+  const firstName = user ? (user.display_name || user.username || "").trim().split(/\s+/)[0] || "" : "";
+
   // ── render ────────────────────────────────────────────────────────
   return (
     <div className="app">
@@ -371,14 +436,72 @@ export default function App() {
             </div>
           </header>
 
+          {user ? (
+            <div className="home-welcome">
+              {user.avatar_url && <img className="home-welcome-avatar" src={user.avatar_url} alt="" />}
+              <div>
+                <div className="home-welcome-name">
+                  <h2>Welcome back{firstName ? `, ${firstName}` : ""}</h2>
+                  {user.is_admin ? <span className="admin-tag">admin</span> : null}
+                </div>
+                <span className="tagline">git-style reading progress for technical books</span>
+              </div>
+            </div>
+          ) : (
+            <div className="home-banner">
+              <p>Sign in with GitHub to track reading sessions and see your stats here.</p>
+              <a className="primary" href="/api/auth/github">Sign in with GitHub</a>
+            </div>
+          )}
+
+          {resumeSession && (
+            <div className="continue-card">
+              <div className="continue-info">
+                <span className="continue-label">Continue reading</span>
+                <Link className="continue-title" to={"/read/" + resumeSession.slug} onClick={() => reconnect(resumeSession.slug)}>
+                  {resumeSession.title || "Book"}
+                </Link>
+                <div className="muted continue-meta">
+                  page {resumePage}
+                  <span aria-hidden="true"> · </span>{fmtMins(resumeSession.minutes)} last session
+                  <span aria-hidden="true"> · </span>{timeAgo(resumeSession.ended_at)}
+                </div>
+              </div>
+              <Link className="primary" to={"/read/" + resumeSession.slug} onClick={() => reconnect(resumeSession.slug)}>Resume</Link>
+            </div>
+          )}
+
+          {user && (
+            <div className={`snapshot${stats ? "" : " snapshot-empty"}`}>
+              {stats ? (
+                <>
+                  <div className="snapshot-block">
+                    <h3>Today</h3>
+                    <StatView s={stats.today} />
+                  </div>
+                  <div className="snapshot-block">
+                    <h3>This week</h3>
+                    <StatView s={stats.week} />
+                  </div>
+                  <div className="snapshot-block snapshot-total">
+                    <h3>All time</h3>
+                    <div className="stat-cell"><strong>{Math.round(stats.totalMinutes)}</strong><span>min read</span></div>
+                  </div>
+                </>
+              ) : (
+                <p className="hint">Finish a reading session and your stats will show up here.</p>
+              )}
+            </div>
+          )}
+
           {supportsFileSystem === false && (
             <p className="hint">Your browser lacks the File System Access API — use Chrome/Edge/Safari.</p>
           )}
           {saved.length === 0 && (
-            <p className="hint">No books attached yet. Pick a local PDF — the file never leaves your device.</p>
+            <p className="hint">{user ? "No books attached yet. Pick a local PDF — the file never leaves your device." : "No books attached yet."}</p>
           )}
           <ul className="book-list library-list">
-            {saved.map((s) => (
+            {orderedSaved.map((s) => (
               <li key={s.bookId} className="book-item library-item" onClick={() => openBook(s)}>
                 {thumbs[s.bookId] && <img className="book-thumb" src={thumbs[s.bookId]} alt="" />}
                 <div className="book-item-body">
@@ -407,6 +530,22 @@ export default function App() {
               </li>
             ))}
           </ul>
+
+          {user && stats?.sessions?.length > 0 && (
+            <section className="recent-sessions">
+              <h2>Recent sessions</h2>
+              <ul className="recent-sessions-list">
+                {stats.sessions.map((s) => (
+                  <li key={s.id} className="recent-session">
+                    <Link className="ghost" to={"/book/" + s.slug}>{s.title || "Book"}</Link>
+                    <span className="muted">{timeAgo(s.ended_at)}</span>
+                    <span className="muted">{fmtMins(s.minutes)}</span>
+                    <span className="muted">{s.read_pages?.length || 0} pages</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
         </section>
       ) : infoKey && !readKey ? (
         /* ── Book info page (/book/:slug) ──────────────────────────── */
