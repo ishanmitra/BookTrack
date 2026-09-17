@@ -150,6 +150,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    setMenuOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
     const onPointerDown = (e) => {
       if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
     };
@@ -425,6 +429,8 @@ export default function App() {
     return list;
   }, [stats, filterBook, profileDay]);
 
+  const showNavbar = showLibrary || isProfile || (infoKey && !readKey);
+
   // ── render ────────────────────────────────────────────────────────
   return (
     <div className="app">
@@ -432,102 +438,123 @@ export default function App() {
         <div className="notice" onClick={() => setNotice("")}>{notice}</div>
       )}
 
-      {isProfile && !user && <Navigate to="/" replace />}
       {isProfile && !!user && !isOwnProfile && <Navigate to="/" replace />}
 
-      {isProfile && isOwnProfile ? (
-        /* ── Profile page ──────────────────────────────────────────── */
-        <section className="profile">
-          <div className="profile-card">
-            <Link className="ghost" to="/">← Library</Link>
-            {user.avatar_url && <img className="profile-avatar" src={user.avatar_url} alt="" />}
-            <h1 className="profile-name">{user.display_name}</h1>
-            <p className="profile-username">@{ownUsername}</p>
-            {user.is_admin ? <span className="admin-tag">admin</span> : null}
-            <button className="ghost" onClick={signOut}>Sign out</button>
-          </div>
-
-          {stats && (
-            <>
-              <div className="profile-stats">
-                <div className="stat-row profile-stat-cells">
-                  <div className="stat-cell"><strong>{stats.books.length}</strong><span>books</span></div>
-                  <div className="stat-cell"><strong>{stats.totalChapters ?? 0}</strong><span>chapters</span></div>
-                  <div className="stat-cell"><strong>{hoursText}</strong><span>{Number(stats.totalMinutes) < 60 ? "min read" : "h read"}</span></div>
-                  <div className="stat-cell"><strong>{longestStreak}</strong><span>best streak{longestStreak === 1 ? "" : "s"}</span></div>
-                </div>
-                <p className="muted profile-joined">{joinedText}</p>
+      {showNavbar && (
+        <nav className="navbar">
+          <div className="navbar-inner">
+            <Link className="navbar-brand" to="/">📚 BookTrack</Link>
+            {!showLibrary && (
+              <div className="navbar-links">
+                <Link className="navbar-link" to="/">Library</Link>
               </div>
-
-              <div className="profile-heatmap">
-                <h2>Reading activity</h2>
-                <Heatmap commits={stats.sessions} onSelectDay={setProfileDay} selectedDay={profileDay} />
-              </div>
-
-              <div className="profile-sessions">
-                <h2>Sessions</h2>
-                <div className="session-filters">
-                  <select value={filterBook} onChange={(e) => setFilterBook(e.target.value)} aria-label="Filter by book">
-                    <option value="">All books</option>
-                    {stats.books.map((b) => (
-                      <option key={b.book_id ?? b.slug} value={b.slug}>{b.title || b.slug}</option>
-                    ))}
-                  </select>
-                  {profileDay && <button className="ghost" onClick={() => setProfileDay(null)}>Clear day filter</button>}
-                  <span className="muted">{profileSessions.length} session{profileSessions.length === 1 ? "" : "s"}</span>
-                </div>
-                {profileSessions.length === 0 ? (
-                  <p className="hint">No sessions match this filter.</p>
-                ) : (
-                  <ul className="session-log">
-                    {profileSessions.slice(0, sessionLimit).map((s) => (
-                      <li key={s.id} className="session-log-row">
-                        <Link className="ghost session-log-book" to={"/book/" + s.slug}>{s.title || "Book"}</Link>
-                        <div className="session-log-meta">
-                          <span className="muted">{new Date(s.ended_at).toLocaleString()}</span>
-                          <span className="muted">{fmtMins(s.minutes)}</span>
-                          <span className="muted">{s.pages} page{s.pages === 1 ? "" : "s"}</span>
-                          <span className="muted">{s.chapters} chapter{s.chapters === 1 ? "" : "s"}</span>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {profileSessions.length > sessionLimit && (
-                  <button className="ghost" onClick={() => setSessionLimit((n) => n + 50)}>Show more</button>
-                )}
-              </div>
-            </>
-          )}
-
-          {!stats && <p className="hint">No reading data yet — finish a session and it will show up here.</p>}
-        </section>
-      ) : showLibrary ? (
-        /* ── Library / home ────────────────────────────────────────── */
-        <section className="library">
-          <header className="library-top">
-            <div>
-              <h1>📚 BookTrack</h1>
-              <span className="tagline">git-style reading progress for technical books</span>
-            </div>
-            <div className="library-user">
-              <button className="primary" onClick={() => pick()} disabled={active.status === STATUS.WIZARD}>+ Add a book</button>
-              {user && (
+            )}
+            <div className="navbar-right">
+              {user ? (
                 <div className="user-menu" ref={menuRef}>
                   <button className="user-menu-toggle" onClick={() => setMenuOpen((v) => !v)} aria-label="Account menu">
                     {user.avatar_url && <img className="user-avatar" src={user.avatar_url} alt="" />}
                   </button>
                   {menuOpen && (
                     <div className="user-menu-pop">
-                      <Link className="user-menu-name" to={"/user/" + ownUsername}>{user.display_name}</Link>
+                      <Link className="user-menu-name" to={"/user/" + ownUsername} onClick={() => setMenuOpen(false)}>{user.display_name}</Link>
                       <button className="user-menu-item" onClick={signOut}>Sign out</button>
                     </div>
                   )}
                 </div>
+              ) : (
+                <a className="ghost" href="/api/auth/github">Sign in</a>
               )}
             </div>
-          </header>
+          </div>
+        </nav>
+      )}
 
+      {isProfile ? (
+        !user ? (
+          /* ── Profile page (signed out) ───────────────────────────── */
+          <section className="profile">
+            <div className="profile-main">
+              <div className="profile-signin">
+                <h2>Welcome to your profile</h2>
+                <p className="muted">Sign in with GitHub to see your reading stats, activity heatmap, and session history.</p>
+                <a className="primary" href="/api/auth/github">Sign in with GitHub</a>
+              </div>
+            </div>
+          </section>
+        ) : (
+        /* ── Profile page ──────────────────────────────────────────── */
+        <section className="profile">
+          <aside className="profile-side">
+            <div className="profile-card">
+              {user.avatar_url && <img className="profile-avatar" src={user.avatar_url} alt="" />}
+              <h1 className="profile-name">{user.display_name}</h1>
+              <p className="profile-username">@{ownUsername}</p>
+              {user.is_admin ? <span className="admin-tag">admin</span> : null}
+              <p className="muted profile-joined">{joinedText}</p>
+            </div>
+          </aside>
+
+          <div className="profile-main">
+            {stats && (
+              <>
+                <div className="profile-stats">
+                  <div className="stat-row profile-stat-cells">
+                    <div className="stat-cell"><strong>{stats.books.length}</strong><span>books</span></div>
+                    <div className="stat-cell"><strong>{stats.totalChapters ?? 0}</strong><span>chapters</span></div>
+                    <div className="stat-cell"><strong>{hoursText}</strong><span>{Number(stats.totalMinutes) < 60 ? "min read" : "h read"}</span></div>
+                    <div className="stat-cell"><strong>{longestStreak}</strong><span>best streak{longestStreak === 1 ? "" : "s"}</span></div>
+                  </div>
+                </div>
+
+                <div className="profile-heatmap">
+                  <h2>Reading activity</h2>
+                  <Heatmap weeksBack={52} commits={stats.sessions} onSelectDay={setProfileDay} selectedDay={profileDay} />
+                </div>
+
+                <div className="profile-sessions">
+                  <h2>Sessions</h2>
+                  <div className="session-filters">
+                    <select value={filterBook} onChange={(e) => setFilterBook(e.target.value)} aria-label="Filter by book">
+                      <option value="">All books</option>
+                      {stats.books.map((b) => (
+                        <option key={b.book_id ?? b.slug} value={b.slug}>{b.title || b.slug}</option>
+                      ))}
+                    </select>
+                    {profileDay && <button className="ghost" onClick={() => setProfileDay(null)}>Clear day filter</button>}
+                    <span className="muted">{profileSessions.length} session{profileSessions.length === 1 ? "" : "s"}</span>
+                  </div>
+                  {profileSessions.length === 0 ? (
+                    <p className="hint">No sessions match this filter.</p>
+                  ) : (
+                    <ul className="session-log">
+                      {profileSessions.slice(0, sessionLimit).map((s) => (
+                        <li key={s.id} className="session-log-row">
+                          <Link className="ghost session-log-book" to={"/book/" + s.slug}>{s.title || "Book"}</Link>
+                          <div className="session-log-meta">
+                            <span className="muted">{new Date(s.ended_at).toLocaleString()}</span>
+                            <span className="muted">{fmtMins(s.minutes)}</span>
+                            <span className="muted">{s.pages} page{s.pages === 1 ? "" : "s"}</span>
+                            <span className="muted">{s.chapters} chapter{s.chapters === 1 ? "" : "s"}</span>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {profileSessions.length > sessionLimit && (
+                    <button className="ghost" onClick={() => setSessionLimit((n) => n + 50)}>Show more</button>
+                  )}
+                </div>
+              </>
+            )}
+
+            {!stats && <p className="hint">No reading data yet — finish a session and it will show up here.</p>}
+          </div>
+        </section>
+        )
+      ) : showLibrary ? (
+        /* ── Library / home ────────────────────────────────────────── */
+        <section className="library">
           {user ? (
             <div className="home-welcome">
               {user.avatar_url && <img className="home-welcome-avatar" src={user.avatar_url} alt="" />}
@@ -587,6 +614,13 @@ export default function App() {
               )}
             </div>
           )}
+
+          <header className="library-top">
+            <h1>Library</h1>
+            <div className="library-user">
+              <button className="primary" onClick={() => pick()} disabled={active.status === STATUS.WIZARD}>+ Add a book</button>
+            </div>
+          </header>
 
           {supportsFileSystem === false && (
             <p className="hint">Your browser lacks the File System Access API — use Chrome/Edge/Safari.</p>

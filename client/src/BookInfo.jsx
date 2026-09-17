@@ -22,7 +22,6 @@ export default function BookInfo({ slug, thumb }) {
     return (
       <section className="book-info">
         <div className="book-info-card">
-          <Link className="ghost" to="/">← Library</Link>
           <p className="muted">Loading…</p>
         </div>
       </section>
@@ -33,7 +32,6 @@ export default function BookInfo({ slug, thumb }) {
     return (
       <section className="book-info">
         <div className="book-info-card">
-          <Link className="ghost" to="/">← Library</Link>
           <p className="muted">{error || "Book not found"}</p>
         </div>
       </section>
@@ -43,7 +41,6 @@ export default function BookInfo({ slug, thumb }) {
   return (
     <section className="book-info">
       <div className="book-info-card">
-        <Link className="ghost" to="/">← Library</Link>
         <div className="book-info-head">
           {thumb && <img className="book-info-cover" src={thumb} alt="" />}
           <div className="book-info-details">

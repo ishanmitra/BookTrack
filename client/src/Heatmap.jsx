@@ -11,20 +11,28 @@ function startOfWeekMonday(date) {
 }
 
 function buildGrid(commits, weeksBack = 26) {
-  const dayMinutes = {};
-  let totalMinutes = 0;
-  for (const c of commits || []) {
-    const minutes = Number(c.minutes) || 0;
-    totalMinutes += minutes;
-    const key = String(c.started_at || "").slice(0, 10);
-    if (key) dayMinutes[key] = (dayMinutes[key] || 0) + minutes;
-  }
-  const values = Object.values(dayMinutes);
-  const max = values.length ? Math.max(...values) : 0;
-
   const today = new Date();
   const start = startOfWeekMonday(today);
   start.setDate(start.getDate() - (weeksBack - 1) * 7);
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const dateKey = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const startKey = dateKey(start);
+  const todayKey = dateKey(today);
+
+  const dayMinutes = {};
+  let totalMinutes = 0;
+  let sessionCount = 0;
+  for (const c of commits || []) {
+    const key = String(c.started_at || "").slice(0, 10);
+    if (!key || key < startKey || key > todayKey) continue;
+    const minutes = Number(c.minutes) || 0;
+    totalMinutes += minutes;
+    sessionCount += 1;
+    dayMinutes[key] = (dayMinutes[key] || 0) + minutes;
+  }
+
+  const values = Object.values(dayMinutes);
+  const max = values.length ? Math.max(...values) : 0;
 
   const columns = [];
   for (let w = 0; w < weeksBack; w++) {
@@ -32,14 +40,15 @@ function buildGrid(commits, weeksBack = 26) {
     for (let d = 0; d < 7; d++) {
       const date = new Date(start);
       date.setDate(start.getDate() + w * 7 + d);
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      const key = dateKey(date);
+      if (key > todayKey) break;
       const mins = dayMinutes[key] || 0;
       const level = max > 0 && mins > 0 ? 1 + Math.min(3, Math.floor((mins / max) * 4)) : 0;
       week.push({ date: key, minutes: mins, level });
     }
-    columns.push(week);
+    if (week.length) columns.push(week);
   }
-  return { columns, totalMinutes, sessionCount: (commits || []).length };
+  return { columns, totalMinutes, sessionCount };
 }
 
 export default function Heatmap({ commits, weeksBack = 26, onSelectDay, selectedDay }) {
@@ -64,20 +73,22 @@ export default function Heatmap({ commits, weeksBack = 26, onSelectDay, selected
           <span className="spacer" />
           {DAY_NAMES.map((d) => <span key={d}>{d}</span>)}
         </div>
-        <div className="heatmap-grid">
-          {columns.map((week, wi) => (
-            <div className="heatmap-week" key={wi}>
-              {week.map((cell) => (
-                <div
-                  key={cell.date}
-                  className={`heatmap-cell${cell.minutes ? " clickable" : ""}${cell.date === selectedDay ? " selected" : ""}`}
-                  style={{ backgroundColor: PALETTE[cell.level] }}
-                  title={cell.minutes ? `${cell.date}: ${cell.minutes.toFixed(0)} min read` : cell.date}
-                  onClick={() => cell.minutes && onSelectDay?.(cell.date === selectedDay ? null : cell.date)}
-                />
-              ))}
-            </div>
-          ))}
+        <div className="heatmap-scroll">
+          <div className="heatmap-grid">
+            {columns.map((week, wi) => (
+              <div className="heatmap-week" key={wi}>
+                {week.map((cell) => (
+                  <div
+                    key={cell.date}
+                    className={`heatmap-cell${cell.minutes ? " clickable" : ""}${cell.date === selectedDay ? " selected" : ""}`}
+                    style={{ backgroundColor: PALETTE[cell.level] }}
+                    title={cell.minutes ? `${cell.date}: ${cell.minutes.toFixed(0)} min read` : cell.date}
+                    onClick={() => cell.minutes && onSelectDay?.(cell.date === selectedDay ? null : cell.date)}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
       <div className="heatmap-legend">
