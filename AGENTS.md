@@ -310,6 +310,26 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
   **Open** (→ reader) and **Info** (→ info page) buttons; clicking the row
   itself also opens the reader. The `/api/book/:slug` endpoint is public (no
   auth required).
+- **Home revamp (Phase C)**: the library page leads with a signed-in welcome
+  line (`Welcome back, {firstName}`, admin chip) or, when logged out, a
+  featured hero ("Welcome to BookTrack") whose single primary CTA signs you in
+  (the header no longer shows a second sign-in button). A **Continue reading**
+  card offers the most recent attached session (last page, last-session clock,
+  relative time, Resume → `/read/:slug`). A **snapshot** shows today/this
+  week/all-time minutes, pages and chapters (server `GET /api/me/stats`), the
+  library is ordered by most recently read, and a **recent-sessions** list
+  (latest 10) sits under the shelf. Signed-out visitors see the hero instead of
+  a snapshot.
+- **Profile page (/user/:username, self-only)** (Phase C): identity card plus a
+  stats panel (books started, chapters done across books, reading time, longest
+  consecutive reading-day streak, `Joined {month year} · N active days`), an
+  **all-books reading heatmap** (reuses `Heatmap.jsx` fed with all sessions,
+  day cells filter the log) and a **filterable session log** (per-book select +
+  day filter from the heatmap; rows show book, end time, minutes, pages,
+  chapters; "Show more" pages +50). Data comes from `GET /api/me/stats`
+  (returns up to the 1000 latest sessions, each with `pages`/`chapters`, plus
+  `totalChapters` = distinct (book, chapter-index) pairs via each book's TOC);
+  `GET /api/auth/me` now also returns `created_at` for the join date.
 
 ## Not built yet (next steps)
 

@@ -351,6 +351,8 @@ span.admin-tag {
   white-space: nowrap;
 }
 .danger-row .admin-tag { font-size: 9px; }
+.profile-card .admin-tag,
+.home-welcome-name .admin-tag { margin-left: 0; }
 .danger-row.admin-forget { background: rgba(163, 113, 247, 0.06); }
 
 .panel {
@@ -717,17 +719,18 @@ span.admin-tag {
 }
 .home-welcome-name { display: flex; align-items: center; gap: 8px; }
 .home-welcome-name h2 { margin: 0; font-size: 18px; }
-.home-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px;
-  border: 1px dashed var(--border);
-  border-radius: 8px;
-  margin: 4px 0 20px;
+.home-welcome-hero {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 20px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
 }
-.home-banner p { margin: 0; font-size: 13px; color: var(--muted); }
+.home-welcome-hero h2 { font-size: 20px; }
+.hero-copy { margin: 0; color: var(--muted); font-size: 13px; max-width: 560px; line-height: 1.5; }
+.hero-signin { margin-top: 4px; align-self: flex-start; }
 
 .continue-card {
   display: flex;
@@ -806,7 +809,62 @@ span.admin-tag {
 .recent-session .muted { white-space: nowrap; }
 
 @media (max-width: 640px) {
-  .home-welcome, .home-banner, .continue-card { flex-wrap: wrap; }
+  .home-welcome, .continue-card { flex-wrap: wrap; }
   .snapshot { flex-direction: column; }
   .continue-card { align-items: flex-start; }
+}
+
+/* ── Profile page (Phase C): stats, heatmap, session log ─────────── */
+.profile-stats {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  margin: 24px 0;
+}
+.profile-stat-cells { justify-content: space-around; gap: 8px; text-align: center; }
+.profile-stat-cells .stat-cell strong { font-size: 26px; }
+.profile-stat-cells .stat-cell span { font-size: 12px; }
+.profile-joined { margin: 16px 0 0; text-align: center; }
+
+.profile-heatmap { margin: 0 0 24px; }
+.profile-heatmap h2,
+.profile-sessions h2 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.session-filters { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; }
+.session-filters select {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  max-width: 240px;
+}
+.session-filters .muted { margin-left: auto; }
+
+.session-log { list-style: none; margin: 0; padding: 0; }
+.session-log-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.session-log-book { flex: 1; min-width: 0; justify-content: flex-start; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-log-meta { display: flex; gap: 12px; flex-wrap: wrap; }
+.session-log-meta .muted { white-space: nowrap; }
+
+@media (max-width: 640px) {
+  .session-log-row { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .session-filters { flex-wrap: wrap; }
 }

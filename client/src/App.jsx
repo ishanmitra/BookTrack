@@ -86,6 +86,9 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [stats, setStats] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [profileDay, setProfileDay] = useState(null);
+  const [filterBook, setFilterBook] = useState("");
+  const [sessionLimit, setSessionLimit] = useState(50);
   const menuRef = useRef(null);
   const activeBookIdRef = useRef(null);
   const readerRef = useRef(null);
@@ -130,7 +133,7 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
-    if (!user || !showLibrary) return;
+    if (!user || (!showLibrary && !isProfile)) return;
     api.meStats().then(setStats).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname, user]);
@@ -386,6 +389,42 @@ export default function App() {
   const resumePage = resumeSession ? storage.getLastPage(resumeSession.fingerprint) : 1;
   const firstName = user ? (user.display_name || user.username || "").trim().split(/\s+/)[0] || "" : "";
 
+  // ── profile page data ─────────────────────────────────────────────
+  const activeDays = useMemo(() => {
+    const set = new Set((stats?.sessions || []).map((s) => String(s.started_at || "").slice(0, 10)).filter(Boolean));
+    return set.size;
+  }, [stats]);
+
+  const longestStreak = useMemo(() => {
+    const keys = [...new Set((stats?.sessions || []).map((s) => String(s.started_at || "").slice(0, 10)).filter(Boolean))].sort();
+    let best = 0, run = 1;
+    for (let i = 1; i < keys.length; i++) {
+      if (Math.round((new Date(keys[i]) - new Date(keys[i - 1])) / 86400000) === 1) run++;
+      else { if (run > best) best = run; run = 1; }
+    }
+    return Math.max(best, keys.length ? run : 0);
+  }, [stats]);
+
+  const joinedText = useMemo(() => {
+    if (!user?.created_at) return "";
+    const d = new Date(user.created_at);
+    const base = `Joined ${d.toLocaleDateString(undefined, { month: "short", year: "numeric" })}`;
+    return activeDays ? `${base} · ${activeDays} active day${activeDays === 1 ? "" : "s"}` : base;
+  }, [user, activeDays]);
+
+  const hoursText = useMemo(() => {
+    const m = Number(stats?.totalMinutes) || 0;
+    if (m < 60) return `${Math.round(m)}`;
+    return String(Math.round((m / 60) * 10) / 10).replace(/\.0$/, "");
+  }, [stats]);
+
+  const profileSessions = useMemo(() => {
+    let list = stats?.sessions || [];
+    if (filterBook) list = list.filter((s) => s.slug === filterBook);
+    if (profileDay) list = list.filter((s) => String(s.started_at || "").slice(0, 10) === profileDay);
+    return list;
+  }, [stats, filterBook, profileDay]);
+
   // ── render ────────────────────────────────────────────────────────
   return (
     <div className="app">
@@ -404,9 +443,64 @@ export default function App() {
             {user.avatar_url && <img className="profile-avatar" src={user.avatar_url} alt="" />}
             <h1 className="profile-name">{user.display_name}</h1>
             <p className="profile-username">@{ownUsername}</p>
-            {user.is_admin ? <span className="badge">admin</span> : null}
+            {user.is_admin ? <span className="admin-tag">admin</span> : null}
             <button className="ghost" onClick={signOut}>Sign out</button>
           </div>
+
+          {stats && (
+            <>
+              <div className="profile-stats">
+                <div className="stat-row profile-stat-cells">
+                  <div className="stat-cell"><strong>{stats.books.length}</strong><span>books</span></div>
+                  <div className="stat-cell"><strong>{stats.totalChapters ?? 0}</strong><span>chapters</span></div>
+                  <div className="stat-cell"><strong>{hoursText}</strong><span>{Number(stats.totalMinutes) < 60 ? "min read" : "h read"}</span></div>
+                  <div className="stat-cell"><strong>{longestStreak}</strong><span>best streak{longestStreak === 1 ? "" : "s"}</span></div>
+                </div>
+                <p className="muted profile-joined">{joinedText}</p>
+              </div>
+
+              <div className="profile-heatmap">
+                <h2>Reading activity</h2>
+                <Heatmap commits={stats.sessions} onSelectDay={setProfileDay} selectedDay={profileDay} />
+              </div>
+
+              <div className="profile-sessions">
+                <h2>Sessions</h2>
+                <div className="session-filters">
+                  <select value={filterBook} onChange={(e) => setFilterBook(e.target.value)} aria-label="Filter by book">
+                    <option value="">All books</option>
+                    {stats.books.map((b) => (
+                      <option key={b.book_id ?? b.slug} value={b.slug}>{b.title || b.slug}</option>
+                    ))}
+                  </select>
+                  {profileDay && <button className="ghost" onClick={() => setProfileDay(null)}>Clear day filter</button>}
+                  <span className="muted">{profileSessions.length} session{profileSessions.length === 1 ? "" : "s"}</span>
+                </div>
+                {profileSessions.length === 0 ? (
+                  <p className="hint">No sessions match this filter.</p>
+                ) : (
+                  <ul className="session-log">
+                    {profileSessions.slice(0, sessionLimit).map((s) => (
+                      <li key={s.id} className="session-log-row">
+                        <Link className="ghost session-log-book" to={"/book/" + s.slug}>{s.title || "Book"}</Link>
+                        <div className="session-log-meta">
+                          <span className="muted">{new Date(s.ended_at).toLocaleString()}</span>
+                          <span className="muted">{fmtMins(s.minutes)}</span>
+                          <span className="muted">{s.pages} page{s.pages === 1 ? "" : "s"}</span>
+                          <span className="muted">{s.chapters} chapter{s.chapters === 1 ? "" : "s"}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {profileSessions.length > sessionLimit && (
+                  <button className="ghost" onClick={() => setSessionLimit((n) => n + 50)}>Show more</button>
+                )}
+              </div>
+            </>
+          )}
+
+          {!stats && <p className="hint">No reading data yet — finish a session and it will show up here.</p>}
         </section>
       ) : showLibrary ? (
         /* ── Library / home ────────────────────────────────────────── */
@@ -418,7 +512,7 @@ export default function App() {
             </div>
             <div className="library-user">
               <button className="primary" onClick={() => pick()} disabled={active.status === STATUS.WIZARD}>+ Add a book</button>
-              {user ? (
+              {user && (
                 <div className="user-menu" ref={menuRef}>
                   <button className="user-menu-toggle" onClick={() => setMenuOpen((v) => !v)} aria-label="Account menu">
                     {user.avatar_url && <img className="user-avatar" src={user.avatar_url} alt="" />}
@@ -430,8 +524,6 @@ export default function App() {
                     </div>
                   )}
                 </div>
-              ) : (
-                <a className="primary" href="/api/auth/github">Sign in with GitHub</a>
               )}
             </div>
           </header>
@@ -444,13 +536,15 @@ export default function App() {
                   <h2>Welcome back{firstName ? `, ${firstName}` : ""}</h2>
                   {user.is_admin ? <span className="admin-tag">admin</span> : null}
                 </div>
-                <span className="tagline">git-style reading progress for technical books</span>
               </div>
             </div>
           ) : (
-            <div className="home-banner">
-              <p>Sign in with GitHub to track reading sessions and see your stats here.</p>
-              <a className="primary" href="/api/auth/github">Sign in with GitHub</a>
+            <div className="home-welcome home-welcome-hero">
+              <div className="home-welcome-name">
+                <h2>Welcome to BookTrack</h2>
+              </div>
+              <p className="hero-copy">Track your reading sessions, pages, and progress on technical books with git-style commit metrics — your PDFs never leave your device.</p>
+              <a className="primary hero-signin" href="/api/auth/github">Sign in with GitHub to start tracking</a>
             </div>
           )}
 
@@ -535,7 +629,7 @@ export default function App() {
             <section className="recent-sessions">
               <h2>Recent sessions</h2>
               <ul className="recent-sessions-list">
-                {stats.sessions.map((s) => (
+                {stats.sessions.slice(0, 10).map((s) => (
                   <li key={s.id} className="recent-session">
                     <Link className="ghost" to={"/book/" + s.slug}>{s.title || "Book"}</Link>
                     <span className="muted">{timeAgo(s.ended_at)}</span>

@@ -281,18 +281,18 @@ export function deleteBookCommits(bookId, userId) {
   return q.deleteCommitsForUser.run(bookId, userId).changes;
 }
 
-function distinctChapters(readPages, toc) {
+function chapterIndexes(readPages, toc) {
   const starts = (toc || []).map((t) => Number(t.startPage) || 0).filter((n) => n > 0).sort((a, b) => a - b);
-  if (!starts.length) return 0;
-  const seen = new Set();
+  const idx = new Set();
+  if (!starts.length) return idx;
   for (const p of readPages || []) {
     const n = Number(p) || 0;
     if (!n) continue;
     let i = starts.length - 1;
     while (i >= 0 && starts[i] > n) i--;
-    if (i >= 0) seen.add(i);
+    if (i >= 0) idx.add(i);
   }
-  return seen.size;
+  return idx;
 }
 
 const parseToc = (raw) => {
@@ -312,6 +312,8 @@ export function getUserStats(userId) {
   let today = { minutes: 0, pages: 0, chapters: 0 };
   let week = { minutes: 0, pages: 0, chapters: 0 };
   let totalMinutes = 0;
+  let totalChapters = 0;
+  const perBookChapters = new Map();
   const byBook = new Map();
   const sessions = [];
   for (const r of rows) {
@@ -320,17 +322,20 @@ export function getUserStats(userId) {
     const started = Date.parse(c.started_at) || now.getTime();
     const mins = Number(c.minutes) || 0;
     const pages = Array.isArray(c.read_pages) ? c.read_pages.length : 0;
-    const chapters = distinctChapters(c.read_pages, toc);
+    const chapterIdx = chapterIndexes(c.read_pages, toc);
+    let bookChapters = perBookChapters.get(c.book_id);
+    if (!bookChapters) { bookChapters = new Set(); perBookChapters.set(c.book_id, bookChapters); }
+    for (const ci of chapterIdx) bookChapters.add(ci);
     totalMinutes += mins;
     if (started >= startOfToday) {
       today.minutes += mins;
       today.pages += pages;
-      today.chapters += chapters;
+      today.chapters += chapterIdx.size;
     }
     if (started >= startOfWeek) {
       week.minutes += mins;
       week.pages += pages;
-      week.chapters += chapters;
+      week.chapters += chapterIdx.size;
     }
     if (!byBook.has(c.book_id)) {
       byBook.set(c.book_id, { book_id: c.book_id, slug: r.book_slug ?? null, title: r.book_title ?? null, fingerprint: r.book_fingerprint ?? null, minutes: 0, sessions: 0, last_read_at: null });
@@ -348,9 +353,12 @@ export function getUserStats(userId) {
       started_at: c.started_at,
       ended_at: c.ended_at,
       minutes: mins,
+      pages: pages,
+      chapters: chapterIdx.size,
       read_pages: c.read_pages || [],
     });
   }
+  for (const s of perBookChapters.values()) totalChapters += s.size;
   const round = (n) => Math.round(n * 10) / 10;
   today.minutes = round(today.minutes);
   week.minutes = round(week.minutes);
@@ -358,7 +366,8 @@ export function getUserStats(userId) {
     today,
     week,
     totalMinutes: round(totalMinutes),
+    totalChapters,
     books: [...byBook.values()],
-    sessions: sessions.slice(0, 10),
+    sessions: sessions.slice(0, 1000),
   };
 }

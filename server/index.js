@@ -82,7 +82,7 @@ app.get("/api/auth/github/callback", async (req, res) => {
 app.get("/api/auth/me", (req, res) => {
   const u = auth.currentUser(req);
   res.json({
-    user: u ? { id: u.id, display_name: u.display_name, username: u.username, avatar_url: u.avatar_url, is_admin: u.is_admin } : null,
+    user: u ? { id: u.id, display_name: u.display_name, username: u.username, avatar_url: u.avatar_url, is_admin: u.is_admin, created_at: u.created_at } : null,
   });
 });
 
