@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
 const PALETTE = ["#21262d", "#9be9a8", "#40c463", "#30a14e", "#216e39"];
 const DAY_NAMES = ["Mon", "Wed", "Fri"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function startOfWeekMonday(date) {
   const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -51,11 +52,59 @@ function buildGrid(commits, weeksBack = 26) {
   return { columns, totalMinutes, sessionCount };
 }
 
+const fmtDate = (iso) =>
+  new Date(iso + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", year: "numeric", month: "short", day: "numeric" });
+
 export default function Heatmap({ commits, weeksBack = 26, onSelectDay, selectedDay }) {
   const { columns, totalMinutes, sessionCount } = useMemo(() => buildGrid(commits, weeksBack), [commits, weeksBack]);
+  const heatRef = useRef(null);
+  const tipRef = useRef(null);
+  const [tip, setTip] = useState(null);
+  const [tipPos, setTipPos] = useState({ left: -999, top: -999 });
+
+  useLayoutEffect(() => {
+    if (!tip || !tipRef.current || !heatRef.current) return;
+    const rect = heatRef.current.getBoundingClientRect();
+    const w = tipRef.current.offsetWidth;
+    const h = tipRef.current.offsetHeight;
+    let left = tip.x + 12;
+    if (left + w > rect.width - 4) left = tip.x - w - 12;
+    let top = tip.y - h - 10;
+    if (top < 4) top = tip.y + 14;
+    top = Math.min(top, rect.height - h - 4);
+    setTipPos({ left: Math.max(4, left), top: Math.max(4, top) });
+  }, [tip]);
+
+  const monthLabels = useMemo(() => {
+    const out = [];
+    for (let wi = 0; wi < columns.length; wi++) {
+      const m = columns[wi].length ? Number(columns[wi][0].date.slice(5, 7)) : 0;
+      const prevM = wi > 0 && columns[wi - 1].length ? Number(columns[wi - 1][0].date.slice(5, 7)) : m;
+      out.push(wi === 0 || m !== prevM ? MONTHS[m - 1] : "");
+    }
+    return out;
+  }, [columns]);
+
+  const onHover = (e, cell) => {
+    const el = heatRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setTip({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+      text: cell.minutes
+        ? `${fmtDate(cell.date)} — ${cell.minutes.toFixed(0)} min read`
+        : `${fmtDate(cell.date)} — no reading`,
+    });
+  };
 
   return (
-    <div className="heatmap">
+    <div className="heatmap" ref={heatRef}>
+      {tip && (
+        <div className="heatmap-tooltip" ref={tipRef} style={{ left: tipPos.left, top: tipPos.top }}>
+          {tip.text}
+        </div>
+      )}
       <div className="heatmap-header">
         <strong>{totalMinutes.toFixed(0)} min read</strong>
         <span>across {sessionCount} reading sessions</span>
@@ -74,6 +123,11 @@ export default function Heatmap({ commits, weeksBack = 26, onSelectDay, selected
           {DAY_NAMES.map((d) => <span key={d}>{d}</span>)}
         </div>
         <div className="heatmap-scroll">
+          <div className="heatmap-months">
+            {monthLabels.map((label, wi) => (
+              <span key={wi} className={`heatmap-month${label ? " has-label" : ""}`}>{label}</span>
+            ))}
+          </div>
           <div className="heatmap-grid">
             {columns.map((week, wi) => (
               <div className="heatmap-week" key={wi}>
@@ -82,7 +136,8 @@ export default function Heatmap({ commits, weeksBack = 26, onSelectDay, selected
                     key={cell.date}
                     className={`heatmap-cell${cell.minutes ? " clickable" : ""}${cell.date === selectedDay ? " selected" : ""}`}
                     style={{ backgroundColor: PALETTE[cell.level] }}
-                    title={cell.minutes ? `${cell.date}: ${cell.minutes.toFixed(0)} min read` : cell.date}
+                    onMouseMove={(e) => onHover(e, cell)}
+                    onMouseLeave={() => setTip(null)}
                     onClick={() => cell.minutes && onSelectDay?.(cell.date === selectedDay ? null : cell.date)}
                   />
                 ))}

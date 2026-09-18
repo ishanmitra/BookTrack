@@ -10,6 +10,7 @@ import TocTable from "./TocTable";
 import ChapterProgress from "./ChapterProgress";
 import BookWizard from "./BookWizard";
 import BookInfo from "./BookInfo";
+import AdminPage from "./AdminPage";
 
 const STATUS_LABEL = {
   [STATUS.READY]: "✔ connected",
@@ -98,10 +99,15 @@ export default function App() {
   const profileUsername = location.pathname.match(/^\/user\/([^/]+)/)?.[1] || null;
   const isProfile = profileUsername != null;
   const ownUsername = user?.username || user?.display_name || "";
-  const isOwnProfile = isProfile && !!user && profileUsername.toLowerCase() === ownUsername.toLowerCase();
+
+  const [profile, setProfile] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileLoadedUser, setProfileLoadedUser] = useState(null);
+
   const infoKey = location.pathname.match(/^\/book\/([^/]+)/)?.[1] || null;
   const readKey = location.pathname.match(/^\/read\/([^/]+)/)?.[1] || null;
-  const showLibrary = !isProfile && !infoKey && !readKey;
+  const isAdminPage = location.pathname.startsWith("/admin");
+  const showLibrary = !isProfile && !infoKey && !readKey && !isAdminPage;
   const bookOpen = !!readKey && active.file != null;
   const readerOpen = active.status === STATUS.READY && active.file != null;
 
@@ -132,8 +138,30 @@ export default function App() {
     api.meStats().then(setStats).catch(() => {});
   }, [user]);
 
+  // ── public profile fetch (/user/:username) — works signed in or out ──
   useEffect(() => {
-    if (!user || (!showLibrary && !isProfile)) return;
+    let cancelled = false;
+    if (!profileUsername) return undefined;
+    setProfileLoading(true);
+    api.getProfile(profileUsername)
+      .then((r) => {
+        if (cancelled) return;
+        setProfile(r.notFound ? null : r);
+        setProfileLoadedUser(profileUsername.toLowerCase());
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setProfile(null);
+        setProfileLoadedUser(profileUsername.toLowerCase());
+      })
+      .finally(() => { if (!cancelled) setProfileLoading(false); });
+    return () => { cancelled = true; };
+  }, [profileUsername]);
+
+  const profileLoaded = profileLoadedUser === (profileUsername || "").toLowerCase();
+
+  useEffect(() => {
+    if (!user || !showLibrary) return;
     api.meStats().then(setStats).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname, user]);
@@ -272,7 +300,7 @@ export default function App() {
       setMetaBase({ title: updated.title, author: updated.author, edition: updated.edition, slug: nextSlug });
       setToc(updated.toc);
       setTocDirty(false);
-      persistSavedMeta(targetId, { title: updated.title, author: updated.author, edition: updated.edition, slug: nextSlug });
+      persistSavedMeta(targetId, { title: updated.title, author: updated.author, edition: updated.edition, slug: nextSlug, pending: updated.pending || 0 });
       return updated;
     } catch (err) {
       setNotice(`Save failed: ${err.message}`);
@@ -355,10 +383,15 @@ export default function App() {
   };
 
   const signOut = async () => { await api.logout(); setUser(null); setMenuOpen(false); navigate("/"); };
+  const handleAccountDeleted = () => { setUser(null); setMenuOpen(false); navigate("/"); };
 
   const handleStopTracking = async (bookId) => { await stopTracking(bookId); navigate("/"); };
   const handleForget = async (bookId) => {
-    if (!window.confirm("Forget this book? Its stats, commits, and local data will be permanently deleted.")) return;
+    if (!window.confirm(
+      user?.is_admin
+        ? "Forget this book? As admin: if it has reading history it is retired (history kept, hidden from the catalog); without history it is deleted outright. Local data is always removed."
+        : "Forget this book? Its stats, commits, and local data will be permanently deleted."
+    )) return;
     await forget(bookId);
     navigate("/");
   };
@@ -394,42 +427,44 @@ export default function App() {
   const firstName = user ? (user.display_name || user.username || "").trim().split(/\s+/)[0] || "" : "";
 
   // ── profile page data ─────────────────────────────────────────────
+  const pStats = profile?.stats;
+  const pUser = profile?.user;
   const activeDays = useMemo(() => {
-    const set = new Set((stats?.sessions || []).map((s) => String(s.started_at || "").slice(0, 10)).filter(Boolean));
+    const set = new Set((pStats?.sessions || []).map((s) => String(s.started_at || "").slice(0, 10)).filter(Boolean));
     return set.size;
-  }, [stats]);
+  }, [pStats]);
 
   const longestStreak = useMemo(() => {
-    const keys = [...new Set((stats?.sessions || []).map((s) => String(s.started_at || "").slice(0, 10)).filter(Boolean))].sort();
+    const keys = [...new Set((pStats?.sessions || []).map((s) => String(s.started_at || "").slice(0, 10)).filter(Boolean))].sort();
     let best = 0, run = 1;
     for (let i = 1; i < keys.length; i++) {
       if (Math.round((new Date(keys[i]) - new Date(keys[i - 1])) / 86400000) === 1) run++;
       else { if (run > best) best = run; run = 1; }
     }
     return Math.max(best, keys.length ? run : 0);
-  }, [stats]);
+  }, [pStats]);
 
   const joinedText = useMemo(() => {
-    if (!user?.created_at) return "";
-    const d = new Date(user.created_at);
+    if (!pUser?.created_at) return "";
+    const d = new Date(pUser.created_at);
     const base = `Joined ${d.toLocaleDateString(undefined, { month: "short", year: "numeric" })}`;
     return activeDays ? `${base} · ${activeDays} active day${activeDays === 1 ? "" : "s"}` : base;
-  }, [user, activeDays]);
+  }, [pUser, activeDays]);
 
   const hoursText = useMemo(() => {
-    const m = Number(stats?.totalMinutes) || 0;
+    const m = Number(pStats?.totalMinutes) || 0;
     if (m < 60) return `${Math.round(m)}`;
     return String(Math.round((m / 60) * 10) / 10).replace(/\.0$/, "");
-  }, [stats]);
+  }, [pStats]);
 
   const profileSessions = useMemo(() => {
-    let list = stats?.sessions || [];
+    let list = pStats?.sessions || [];
     if (filterBook) list = list.filter((s) => s.slug === filterBook);
     if (profileDay) list = list.filter((s) => String(s.started_at || "").slice(0, 10) === profileDay);
     return list;
-  }, [stats, filterBook, profileDay]);
+  }, [pStats, filterBook, profileDay]);
 
-  const showNavbar = showLibrary || isProfile || (infoKey && !readKey);
+  const showNavbar = showLibrary || isProfile || (infoKey && !readKey) || isAdminPage;
 
   // ── render ────────────────────────────────────────────────────────
   return (
@@ -437,8 +472,6 @@ export default function App() {
       {notice && (
         <div className="notice" onClick={() => setNotice("")}>{notice}</div>
       )}
-
-      {isProfile && !!user && !isOwnProfile && <Navigate to="/" replace />}
 
       {showNavbar && (
         <nav className="navbar">
@@ -458,6 +491,9 @@ export default function App() {
                   {menuOpen && (
                     <div className="user-menu-pop">
                       <Link className="user-menu-name" to={"/user/" + ownUsername} onClick={() => setMenuOpen(false)}>{user.display_name}</Link>
+                      {user.is_admin && (
+                        <Link className="user-menu-item" to="/admin" onClick={() => setMenuOpen(false)}>Admin</Link>
+                      )}
                       <button className="user-menu-item" onClick={signOut}>Sign out</button>
                     </div>
                   )}
@@ -471,45 +507,60 @@ export default function App() {
       )}
 
       {isProfile ? (
-        !user ? (
-          /* ── Profile page (signed out) ───────────────────────────── */
+        !profileLoaded || profileLoading ? (
           <section className="profile">
-            <div className="profile-main">
-              <div className="profile-signin">
-                <h2>Welcome to your profile</h2>
-                <p className="muted">Sign in with GitHub to see your reading stats, activity heatmap, and session history.</p>
-                <a className="primary" href="/api/auth/github">Sign in with GitHub</a>
+            <div className="profile-main"><p className="hint">Loading profile…</p></div>
+          </section>
+        ) : !profile ? (
+          /* ── Profile page: user doesn't exist yet ─────────────────── */
+          <section className="profile">
+            <div className="profile-full">
+              <div className="profile-missing">
+                <h2>@{profileUsername} doesn't exist yet</h2>
+                <p className="muted">This user hasn't created their profile.</p>
+                <Link className="primary" to="/">Back to Library</Link>
               </div>
             </div>
           </section>
         ) : (
-        /* ── Profile page ──────────────────────────────────────────── */
+        /* ── Profile page (public — signed in or not) ──────────────── */
         <section className="profile">
           <aside className="profile-side">
             <div className="profile-card">
-              {user.avatar_url && <img className="profile-avatar" src={user.avatar_url} alt="" />}
-              <h1 className="profile-name">{user.display_name}</h1>
-              <p className="profile-username">@{ownUsername}</p>
-              {user.is_admin ? <span className="admin-tag">admin</span> : null}
+              {pUser.avatar_url && <img className="profile-avatar" src={pUser.avatar_url} alt="" />}
+              <h1 className="profile-name">{pUser.display_name}</h1>
+              <p className="profile-username">
+                @{pUser.username}
+                <a
+                  className="profile-github"
+                  href={`https://github.com/${pUser.username}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="GitHub profile"
+                >
+                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z" /></svg>
+                </a>
+              </p>
+              {pUser?.is_admin ? <span className="admin-tag">admin</span> : null}
               <p className="muted profile-joined">{joinedText}</p>
             </div>
           </aside>
 
           <div className="profile-main">
-            {stats && (
+            {pStats && (
               <>
                 <div className="profile-stats">
                   <div className="stat-row profile-stat-cells">
-                    <div className="stat-cell"><strong>{stats.books.length}</strong><span>books</span></div>
-                    <div className="stat-cell"><strong>{stats.totalChapters ?? 0}</strong><span>chapters</span></div>
-                    <div className="stat-cell"><strong>{hoursText}</strong><span>{Number(stats.totalMinutes) < 60 ? "min read" : "h read"}</span></div>
+                    <div className="stat-cell"><strong>{pStats.books.length}</strong><span>books</span></div>
+                    <div className="stat-cell"><strong>{pStats.totalChapters ?? 0}</strong><span>chapters</span></div>
+                    <div className="stat-cell"><strong>{hoursText}</strong><span>{Number(pStats.totalMinutes) < 60 ? "min read" : "h read"}</span></div>
                     <div className="stat-cell"><strong>{longestStreak}</strong><span>best streak{longestStreak === 1 ? "" : "s"}</span></div>
                   </div>
                 </div>
 
                 <div className="profile-heatmap">
                   <h2>Reading activity</h2>
-                  <Heatmap weeksBack={52} commits={stats.sessions} onSelectDay={setProfileDay} selectedDay={profileDay} />
+                  <Heatmap weeksBack={52} commits={pStats.sessions} onSelectDay={setProfileDay} selectedDay={profileDay} />
                 </div>
 
                 <div className="profile-sessions">
@@ -517,7 +568,7 @@ export default function App() {
                   <div className="session-filters">
                     <select value={filterBook} onChange={(e) => setFilterBook(e.target.value)} aria-label="Filter by book">
                       <option value="">All books</option>
-                      {stats.books.map((b) => (
+                      {pStats.books.map((b) => (
                         <option key={b.book_id ?? b.slug} value={b.slug}>{b.title || b.slug}</option>
                       ))}
                     </select>
@@ -548,9 +599,24 @@ export default function App() {
               </>
             )}
 
-            {!stats && <p className="hint">No reading data yet — finish a session and it will show up here.</p>}
+            {!pStats && <p className="hint">No reading data yet — finish a session and it will show up here.</p>}
           </div>
         </section>
+        )
+      ) : isAdminPage ? (
+        /* ── Admin console (/admin) — admins & super admins only ────── */
+        user?.is_admin ? (
+          <AdminPage onAccountDeleted={handleAccountDeleted} />
+        ) : (
+          <section className="profile">
+            <div className="profile-full">
+              <div className="profile-missing">
+                <h2>Admins only</h2>
+                <p className="muted">You need to be signed in as an admin to manage the catalog.</p>
+                <Link className="primary" to="/">Back to Library</Link>
+              </div>
+            </div>
+          </section>
         )
       ) : showLibrary ? (
         /* ── Library / home ────────────────────────────────────────── */
@@ -640,6 +706,9 @@ export default function App() {
                       {pausedSession?.bookKey === s.meta?.fingerprint && (
                         <span className="paused-badge">⏸ paused · {fmtClock(pausedSeconds)}</span>
                       )}
+                      {Number(s.meta?.pending) ? (
+                        <span className="pending-tag" title="This copy awaits admin confirmation in the shared catalog">pending review</span>
+                      ) : null}
                     </div>
                   </div>
                   <div className="book-item-actions">
@@ -834,7 +903,7 @@ export default function App() {
                     </div>
                     {user?.is_admin && (
                     <div className="danger-row admin-forget">
-                      <span>Forget Book — permanently delete the book and all progress. <span className="admin-tag">admin</span></span>
+                      <span>Forget Book — no progress: deleted. Has progress: retired (history kept, hidden from catalog). <span className="admin-tag">admin</span></span>
                       <button className="danger" onClick={() => handleForget(active.bookId)}>Forget Book</button>
                     </div>
                     )}

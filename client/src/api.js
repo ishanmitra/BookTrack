@@ -8,8 +8,15 @@ async function request(path, opts = {}) {
     headers: { ...headers, ...(opts.headers || {}) },
   });
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`${res.status} ${res.statusText}${body ? ` - ${body}` : ""}`);
+    const text = await res.text().catch(() => "");
+    let detail = text;
+    try {
+      const j = JSON.parse(text);
+      if (j && j.error) detail = j.error;
+    } catch {}
+    const err = new Error(detail || `${res.status} ${res.statusText}`);
+    err.status = res.status;
+    throw err;
   }
   return res.json();
 }
@@ -29,7 +36,22 @@ const api = {
   deleteBookCommits: (id) => request(`/api/books/${id}/commits`, { method: "DELETE" }),
   getCommits: (id) => request(`/api/books/${id}/commits`),
   meStats: () => request("/api/me/stats"),
+  getProfile: async (username) => {
+    const r = await fetch("/api/users/" + encodeURIComponent(username));
+    if (r.status === 404) return { notFound: true };
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    return r.json();
+  },
   pushCommit: (id, commit) => request(`/api/books/${id}/commits`, { method: "POST", body: JSON.stringify(commit) }),
+  pendingBooks: () => request("/api/books/pending"),
+  retiredBooks: () => request("/api/books/retired"),
+  adminRole: () => request("/api/admin/role"),
+  bindBook: (fingerprintId, patch = {}) => request(`/api/books/bind/${fingerprintId}`, { method: "POST", body: JSON.stringify(patch) }),
+  reactivateBook: (id) => request(`/api/books/reactivate/${id}`, { method: "POST" }),
+  adminUsers: () => request("/api/admin/users"),
+  setUserRole: (id, role) => request(`/api/admin/users/${id}/role`, { method: "PATCH", body: JSON.stringify({ role }) }),
+  transferSuperAdmin: (userId) => request("/api/admin/transfer", { method: "POST", body: JSON.stringify({ userId }) }),
+  deleteMe: () => request("/api/me", { method: "DELETE" }),
 };
 
 export default api;

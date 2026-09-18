@@ -147,7 +147,7 @@ export default forwardRef(function PdfReader({ file, book, onSessionEnd, onPages
     endedRef.current = true;
     s.endedAt = new Date().toISOString();
     storage.clearSession().catch(() => {});
-    onSessionEnd({ ...s, readPages: [...s.readPages] });
+    onSessionEnd({ ...s, readPages: [...s.readPages], fingerprint: fpRef.current });
     sessionRef.current = null;
     setSessionStats({ seconds: 0, read: 0 });
     setSessionState("idle");
@@ -159,7 +159,7 @@ export default forwardRef(function PdfReader({ file, book, onSessionEnd, onPages
       const pending = await storage.getPendingSession();
       if (pending && pending.sessionId && !pending.endedAt && !pending.paused) {
         pending.endedAt = new Date().toISOString();
-        onSessionEnd({ ...pending, readPages: [...(pending.readPages || [])] });
+        onSessionEnd({ ...pending, readPages: [...(pending.readPages || [])], fingerprint: fpRef.current });
         storage.clearSession().catch(() => {});
       }
     },
@@ -445,7 +445,14 @@ export default forwardRef(function PdfReader({ file, book, onSessionEnd, onPages
     linkServiceRef.current = {
       eventBus: null,
       addLinkAttributes: (link, url, newWindow = false) => {
-        link.href = url;
+        // Only honor safe URI schemes. A crafted PDF can put `javascript:` or
+        // `data:` in a link annotation; assigning it to href would run it in
+        // this origin when clicked. Anything else is rendered as a dead link.
+        if (/^(https?:|ftps?:|mailto:)/i.test((url || "").trim())) {
+          link.href = url;
+        } else {
+          link.removeAttribute("href");
+        }
         link.rel = "noopener";
         if (newWindow) link.target = "_blank";
         else link.removeAttribute("target");

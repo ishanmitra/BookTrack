@@ -86,7 +86,7 @@ export function useLocalBook() {
       const { book, fingerprint } = await ensureRegistered(file);
       const nextId = book.slug;
       if (nextId !== bookId) await storage.rekeyBook(bookId, nextId);
-      storage.saveMetaFor(nextId, { title: book.title, fingerprint, fileKey: fileKeyOf(file), serverId: book.id, slug: book.slug });
+      storage.saveMetaFor(nextId, { title: book.title, fingerprint, fileKey: fileKeyOf(file), serverId: book.id, slug: book.slug, pending: book.pending || 0 });
       return { book, bookId: nextId };
     },
     [ensureRegistered]
@@ -204,7 +204,7 @@ export function useLocalBook() {
         const bookId = book.slug;
         activeRef.current = bookId;
         await storage.saveBookHandle(bookId, handle);
-        storage.saveMetaFor(bookId, { title: book.title, fingerprint, fileKey: fileKeyOf(file), serverId: book.id, slug: book.slug });
+        storage.saveMetaFor(bookId, { title: book.title, fingerprint, fileKey: fileKeyOf(file), serverId: book.id, slug: book.slug, pending: book.pending || 0 });
         if (existingBookId && existingBookId !== bookId) removeSavedEntry(existingBookId);
         setSavedEntry(bookId, { meta: storage.loadSavedMeta()[bookId] || {}, status: STATUS.READY });
         if (existingBookId) {

@@ -86,6 +86,13 @@ export default function BookWizard({
           <button onClick={onCancel} title="Cancel">✕</button>
         </div>
         <div className="wizard-body">
+          {meta?.pending ? (
+            <div className="wizard-notice">
+              This is a new book — as a member it's <strong>pending admin review</strong> for the
+              shared catalog. You can read and track it right away; an admin will confirm the
+              catalog record.
+            </div>
+          ) : null}
           <div className="wizard-thumb-zone">
             {thumb ? (
               <img className="wizard-thumb" src={thumb} alt="First page preview" />

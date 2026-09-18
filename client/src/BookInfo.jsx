@@ -49,7 +49,9 @@ export default function BookInfo({ slug, thumb }) {
             <div className="book-info-meta">
               {book.edition != null && <span>Edition {book.edition}</span>}
               {book.page_count != null && <span>{book.page_count} pages</span>}
+              {book.pending ? <span className="pending-tag">pending review</span> : null}
             </div>
+            {book.pending ? <p className="muted">This book is waiting for an admin to confirm it in the shared catalog — you can still read it.</p> : null}
           </div>
         </div>
         <Link className="primary" to={"/read/" + slug}>
