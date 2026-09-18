@@ -4,6 +4,13 @@ const COOKIE = "bt_session";
 const DAY = 24 * 60 * 60 * 1000;
 const TTL = 30 * DAY;
 
+// Secure flag on by default; opt out with COOKIE_SECURE=0 only for plain-http
+// localhost deployments (browsers treat localhost as a secure context, so dev
+// still works with Secure set).
+const COOKIE_SECURE = process.env.COOKIE_SECURE !== "0";
+
+const cookieOpts = () => ({ httpOnly: true, sameSite: "lax", path: "/", maxAge: TTL / 1000, secure: COOKIE_SECURE });
+
 const sessions = new Map();
 
 function parseCookies(req) {
@@ -38,11 +45,11 @@ export function requireAuth(req, res, next) {
 export function startSession(res, user) {
   const token = randomBytes(24).toString("hex");
   sessions.set(token, { user, expires: Date.now() + TTL });
-  res.cookie(COOKIE, token, { httpOnly: true, sameSite: "lax", path: "/", maxAge: TTL / 1000 });
+  res.cookie(COOKIE, token, cookieOpts());
 }
 
 export function endSession(req, res) {
   const token = parseCookies(req)[COOKIE];
   if (token) sessions.delete(token);
-  res.clearCookie(COOKIE, { path: "/" });
+  res.clearCookie(COOKIE, { path: "/", secure: COOKIE_SECURE });
 }

@@ -9,10 +9,52 @@ import * as auth from "./auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+const CLIENT_ORIGIN =
+  (process.env.CLIENT_ORIGIN || "http://localhost:5173,http://localhost:4000")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
 const app = express();
 app.set("trust proxy", 1);
-app.use(cors({ origin: true, credentials: true }));
+app.use(
+  cors({
+    origin(origin, cb) {
+      if (!origin || CLIENT_ORIGIN.includes(origin)) return cb(null, true);
+      cb(null, false); // no ACAO header → the cross-origin caller can't read responses
+    },
+    credentials: true,
+  })
+);
 app.use(express.json({ limit: "2mb" }));
+
+// Hardening headers. CSP only lands on the app shell (never /api JSON, and
+// never in dev where the page is served by the Vite dev server on :5173).
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  if (!req.path.startsWith("/api")) {
+    res.setHeader(
+      "Content-Security-Policy",
+      [
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob: https://avatars.githubusercontent.com",
+        "worker-src 'self' blob:",
+        "connect-src 'self'",
+        "font-src 'self' data:",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+      ].join("; ")
+    );
+  }
+  next();
+});
 
 const API_KEY = process.env.API_KEY;
 const GH_CLIENT_ID = process.env.GITHUB_CLIENT_ID;
