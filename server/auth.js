@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import * as db from "./db.js";
 
 const COOKIE = "bt_session";
 const DAY = 24 * 60 * 60 * 1000;
@@ -11,8 +12,6 @@ const COOKIE_SECURE = process.env.COOKIE_SECURE !== "0";
 
 const cookieOpts = () => ({ httpOnly: true, sameSite: "lax", path: "/", maxAge: TTL / 1000, secure: COOKIE_SECURE });
 
-const sessions = new Map();
-
 function parseCookies(req) {
   const raw = req.headers.cookie || "";
   const out = {};
@@ -23,16 +22,20 @@ function parseCookies(req) {
   return out;
 }
 
+// Sessions live in the DB (survive restarts, indexed lookups, no process
+// memory). The token only maps to a user id; the live user row is re-read on
+// each request, so role changes take effect immediately and the session never
+// caches stale privileges.
 export function currentUser(req) {
   const token = parseCookies(req)[COOKIE];
   if (!token) return null;
-  const s = sessions.get(token);
+  const s = db.getSession(token);
   if (!s) return null;
-  if (s.expires < Date.now()) {
-    sessions.delete(token);
+  if (s.expires_at < Date.now()) {
+    db.deleteSession(token);
     return null;
   }
-  return s.user;
+  return db.getUserById(s.user_id) || null;
 }
 
 export function requireAuth(req, res, next) {
@@ -44,12 +47,12 @@ export function requireAuth(req, res, next) {
 
 export function startSession(res, user) {
   const token = randomBytes(24).toString("hex");
-  sessions.set(token, { user, expires: Date.now() + TTL });
+  db.createSession(token, user.id, Date.now() + TTL);
   res.cookie(COOKIE, token, cookieOpts());
 }
 
 export function endSession(req, res) {
   const token = parseCookies(req)[COOKIE];
-  if (token) sessions.delete(token);
+  if (token) db.deleteSession(token);
   res.clearCookie(COOKIE, { path: "/", secure: COOKIE_SECURE });
 }

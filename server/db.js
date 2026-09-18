@@ -77,6 +77,16 @@ CREATE TABLE IF NOT EXISTS users (
   role TEXT NOT NULL DEFAULT 'member',
   created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS sessions (
+  token TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 `);
 
 function ensureColumn(table, column, ddl) {
@@ -94,7 +104,7 @@ function columnExists(table, column) {
   return db.pragma(`table_info(${table})`).some((c) => c.name === column);
 }
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 function migrate() {
   const version = db.pragma("user_version", { simple: true }) || 0;
   if (version < 1) {
@@ -123,8 +133,26 @@ function migrate() {
     db.pragma(`user_version = 4`, { simple: true });
   }
   if (version < 5) migrationV5();
+  if (version < 6) migrationV6();
 }
 migrate();
+
+// v6: persistent sessions. The auth Session Map moved to the DB so sessions
+// survive server restarts. The base DDL already created the table; this sets
+// the version marker and any indexes for DBs that predate it.
+function migrationV6() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      token TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      expires_at INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+  `);
+  db.pragma(`user_version = 6`, { simple: true });
+}
 
 // The Phase D restructure, run as one transaction on startup.
 function migrationV5() {
@@ -596,6 +624,30 @@ export function transferSuperAdmin(fromId, toId) {
 
 export function deleteUser(userId) {
   return db.prepare("DELETE FROM users WHERE id = ?").run(userId).changes > 0;
+}
+
+// ── sessions ──────────────────────────────────────────────────────────────────
+
+export function createSession(token, userId, expiresAtMs) {
+  db.prepare("INSERT INTO sessions (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)").run(token, userId, expiresAtMs, isoNow());
+}
+
+export function getSession(token) {
+  return db.prepare("SELECT token, user_id, expires_at FROM sessions WHERE token = ?").get(token) || null;
+}
+
+export function deleteSession(token) {
+  db.prepare("DELETE FROM sessions WHERE token = ?").run(token);
+}
+
+export function deleteUserSessions(userId) {
+  db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
+}
+
+// Opportunistic sweep — run on boot and on an interval so expired rows don't
+// accumulate. One indexed DELETE regardless of table size.
+export function pruneExpiredSessions(nowMs = Date.now()) {
+  db.prepare("DELETE FROM sessions WHERE expires_at < ?").run(nowMs);
 }
 
 // ── commits ──────────────────────────────────────────────────────────────────

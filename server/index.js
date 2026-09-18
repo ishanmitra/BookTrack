@@ -73,6 +73,10 @@ const REDIRECT_URL = process.env.REDIRECT_URL || "/";
 // the super-admin vacancy at boot (self-heal); see db.bootstrapSuperAdmin.
 db.bootstrapSuperAdmin(SUPER_ADMIN_GITHUB_IDS);
 
+// Persistent sessions: sweep expired rows on boot + hourly (one indexed DELETE).
+db.pruneExpiredSessions();
+setInterval(() => db.pruneExpiredSessions(), 60 * 60 * 1000).unref();
+
 const pendingStates = new Map();
 
 app.use("/api", (req, res, next) => {

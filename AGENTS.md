@@ -53,16 +53,18 @@ book-tracker/
 
 ## Data model
 
-Server (SQLite, `server/../data/reader.db`) — **v5 (hierarchy + roles)**, see the
+Server (SQLite, `server/../data/reader.db`) — **v6 (persistent sessions)**, see the
 **Phase D contract** section below for full rules. Schema:
 - `works(id, slug UNIQUE, title, author, retired, created_at)` — the shared URL identity
 - `editions(id, work_id REFERENCES works ON DELETE CASCADE, label, page_count, toc, created_at, UNIQUE(work_id, label))` — TOC is 1:1 with the edition
 - `fingerprints(id, hash UNIQUE, edition_id REFERENCES editions ON DELETE CASCADE, pending, created_at)` — source files, many → one edition
 - `commits(id, fingerprint_id REFERENCES fingerprints ON DELETE CASCADE, user_id, session_id, device_id, started_at, ended_at, minutes, pages JSON, read_pages JSON, created_at)` — facts written against the fingerprint read
 - `users(id, github_id, display_name, username, avatar_url, created_at, role TEXT DEFAULT 'member')` — role = `super_admin` | `admin` | `member`; exactly one super admin enforced by the partial unique index `idx_users_super_admin ON users(role) WHERE role='super_admin'`
+- `sessions(token TEXT PRIMARY KEY, user_id REFERENCES users ON DELETE CASCADE, expires_at INTEGER, created_at)` — auth sessions in the DB (v6); indexed by user and expiry. Random 24-byte hex token; 30-day TTL.
 
 `PRAGMA foreign_keys = ON` at db open; migration v5 rebuilt `commits` to
-`fingerprint_id` and dropped the old flat `books` table. `user_version = 5`.
+`fingerprint_id` and dropped the old flat `books` table; migration v6 moved the
+in-memory auth session map into the `sessions` table. `user_version = 6`.
 
 Client (IndexedDB `book-tracker`) — every book's local state is keyed by its **server slug** (the work's canonical, URL-safe identity; there is no separate client UUID):
 - `handles` — persisted FileSystemFileHandle per slug (reconnects file in later sessions)
@@ -224,7 +226,7 @@ From the flat model to the hierarchy + roles, as one transaction on startup:
 - `POST /api/auth/logout`
 - Optional `API_KEY`: when set, every `/api` request must send the matching `x-api-key` header.
 - **Commits are never anonymous:** every commit endpoint is behind auth; the user is derived from the session cookie, and any client-declared identity is ignored. `PdfReader`'s Start session is gated on being signed in.
-- **Sessions re-read the live role from the DB on each request** (`freshUser` in `server/index.js`): the in-memory session caches a user snapshot, so without this a demoted/transferred admin would keep stale powers until re-login; role changes apply immediately.
+- **Sessions re-read the live role from the DB on each request** (`freshUser` in `server/index.js`): the session row stores only the user id, so every request loads the current user row — a demoted/transferred admin would never keep stale powers; role changes apply immediately.
 - **HTTP hardening** (server/index.js + auth.js): the `bt_session` cookie is `Secure` by default (opt out with `COOKIE_SECURE=0` for plain-http localhost); CORS is locked to `CLIENT_ORIGIN` (comma-separated, default `http://localhost:5173,http://localhost:4000`) with `credentials: true`; response headers include `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Cross-Origin-Opener-Policy: same-origin`, and a `Content-Security-Policy` on non-API responses (`script-src 'self'`, `style-src 'self' 'unsafe-inline'`, `img-src 'self' data: blob: https://avatars.githubusercontent.com`, `worker-src 'self' blob:`, `connect-src 'self'`, `frame-ancestors 'none'`, etc. — pdf.js worker stays same-origin happy).
 - **npm security**: `npm audit` clean for runtime deps (express/qs brought current via `npm audit fix`). Two dev-only advisories remain on the Vite dev server (esbuild/vite <=6.4.2; only exploitable against a reachable dev server, and the client build output is static) — fixing requires a breaking vite 8 major, so it's parked.
 
@@ -343,13 +345,16 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
 - Relocating a missing file that is a *different edition* (new fingerprint)
   joins the matching edition of the same work (v5 edition binding; no new
   record for a mere re-scan of the same work).
-- **Auth sessions are in-memory** (`server/auth.js` `sessions` map). Restarting
-  the server signs everyone out — this is expected in dev; production will need
-  a persistent session store (or signed stateless tokens). Cookie `bt_session` is
-  httpOnly, `SameSite=Lax`, 30-day expiry. GitHub OAuth uses a random `state`
-  with a 10-minute expiry to prevent CSRF; the callback URL must be
-  `<host>/api/auth/github/callback` (in dev it routes through the Vite `/api`
-  proxy on `:5173`).
+- **Auth sessions are DB-backed** (v6): `sessions` rows in `data/reader.db`, so
+  server restarts no longer sign anyone out — sessions persist in SQLite. Each
+  request is one indexed session read (token → user id) plus the live-user
+  fetch, so role changes apply immediately and no privileges are cached.
+  Expired rows are swept on boot and hourly (`db.pruneExpiredSessions`, one
+  indexed DELETE); deleting a user cascades away their sessions. Cookie
+  `bt_session` is httpOnly, `SameSite=Lax`, `Secure` (opt-out `COOKIE_SECURE=0`),
+  30-day expiry. GitHub OAuth uses a random `state` with a 10-minute expiry to
+  prevent CSRF; the callback URL must be `<host>/api/auth/github/callback`
+  (in dev it routes through the Vite `/api` proxy on `:5173`).
 - **Commits' JSON columns must be parsed server-side.** SQLite stores `pages`
   /`read_pages` as TEXT; `listCommits`/`insertCommit` must go through
   `parseCommit` (JSON.parse), or the client receives strings and
@@ -405,9 +410,7 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
   there is deliberately no admin key/token — a client-bundled admin secret is
   extractable by anyone). Phase D replaced the boolean with a `users.role`
   (`super_admin`/`admin`/`member`) and env `GITHUB_SUPER_ADMIN_IDS` +
-  `GITHUB_ADMIN_IDS`; see the Phase D contract. Sessions are in-memory (`server/auth.js` map); server
-  restart signs everyone out (harmless, devs just re-login), and role
-  checks re-read the live role from the DB per request.
+  `GITHUB_ADMIN_IDS`; see the Phase D contract. Sessions are DB-backed (`server/auth.js` now persists to the `sessions` table via `db.createSession`/`getSession`/`deleteSession`), so restarts keep everyone signed in, and role checks re-read the live role from the DB per request.
 - Bug fixes: TDZ hook order (blank page), sidebar not updating on book add,
   keyboard listener stealing form input.
 - **React Router (Phase C)**: URL-based navigation via `react-router-dom`
