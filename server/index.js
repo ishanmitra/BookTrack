@@ -90,23 +90,22 @@ function isAdmin(user) {
   return user?.role === "admin" || user?.role === "super_admin";
 }
 
-// The session caches a user snapshot; roles can change (transfer, demote,
-// grant), so role-sensitive paths always re-read the live row from the DB.
-function freshUser(req) {
-  const s = auth.currentUser(req);
-  if (!s) return null;
-  return db.getUserById(s.id) || null;
+// The session stores only the user id; role-sensitive paths re-read the live
+// row from the DB (auth.currentUser returns it). Passing `res` lets renewal
+// apply: the session is extended and the cookie re-set when it runs low.
+function freshUser(req, res) {
+  return auth.currentUser(req, res);
 }
 
 function requireAuth(req, res, next) {
-  const user = freshUser(req);
+  const user = freshUser(req, res);
   if (!user) return res.status(401).json({ error: "sign in required" });
   req.user = user;
   next();
 }
 
 function requireAdmin(req, res, next) {
-  const user = freshUser(req);
+  const user = freshUser(req, res);
   if (!user) return res.status(401).json({ error: "sign in required" });
   if (!isAdmin(user)) return res.status(403).json({ error: "admin required" });
   req.user = user;
@@ -114,7 +113,7 @@ function requireAdmin(req, res, next) {
 }
 
 function requireSuperAdmin(req, res, next) {
-  const user = freshUser(req);
+  const user = freshUser(req, res);
   if (!user) return res.status(401).json({ error: "sign in required" });
   if (user.role !== "super_admin") return res.status(403).json({ error: "super admin required" });
   req.user = user;
@@ -167,7 +166,7 @@ app.get("/api/auth/github/callback", async (req, res) => {
 });
 
 app.get("/api/auth/me", (req, res) => {
-  const u = freshUser(req);
+  const u = freshUser(req, res);
   res.json({
     user: u
       ? { id: u.id, display_name: u.display_name, username: u.username, avatar_url: u.avatar_url, role: u.role, is_admin: u.role !== "member", created_at: u.created_at }
@@ -212,7 +211,7 @@ app.get("/api/book/:slug", (req, res) => {
 app.post("/api/books", (req, res) => {
   const { fingerprint, title, author, edition, pageCount, slug, toc } = req.body ?? {};
   if (!fingerprint) return res.status(400).json({ error: "fingerprint required" });
-  const role = freshUser(req)?.role || "member";
+  const role = freshUser(req, res)?.role || "member";
   const book = db.parseBook(db.registerBook(fingerprint, { title, author, edition, pageCount, slug, toc }, role));
   res.json(book);
 });

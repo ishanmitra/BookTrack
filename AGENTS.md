@@ -349,12 +349,16 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
   server restarts no longer sign anyone out — sessions persist in SQLite. Each
   request is one indexed session read (token → user id) plus the live-user
   fetch, so role changes apply immediately and no privileges are cached.
-  Expired rows are swept on boot and hourly (`db.pruneExpiredSessions`, one
-  indexed DELETE); deleting a user cascades away their sessions. Cookie
-  `bt_session` is httpOnly, `SameSite=Lax`, `Secure` (opt-out `COOKIE_SECURE=0`),
-  30-day expiry. GitHub OAuth uses a random `state` with a 10-minute expiry to
-  prevent CSRF; the callback URL must be `<host>/api/auth/github/callback`
-  (in dev it routes through the Vite `/api` proxy on `:5173`).
+  **Sliding renewal**: on every authenticated lookup, a session running low
+  (<= 1/3 TTL left) is extended back to a full TTL and the cookie's `Max-Age`
+  is refreshed — active users never hit the 30-day wall; only genuinely idle
+  sessions age out. Expired rows are swept on boot and hourly
+  (`db.pruneExpiredSessions`, one indexed DELETE); deleting a user cascades
+  away their sessions. Cookie `bt_session` is httpOnly, `SameSite=Lax`,
+  `Secure` (opt-out `COOKIE_SECURE=0`), 30-day expiry. GitHub OAuth uses a
+  random `state` with a 10-minute expiry to prevent CSRF; the callback URL
+  must be `<host>/api/auth/github/callback` (in dev it routes through the
+  Vite `/api` proxy on `:5173`).
 - **Commits' JSON columns must be parsed server-side.** SQLite stores `pages`
   /`read_pages` as TEXT; `listCommits`/`insertCommit` must go through
   `parseCommit` (JSON.parse), or the client receives strings and

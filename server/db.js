@@ -640,6 +640,10 @@ export function deleteSession(token) {
   db.prepare("DELETE FROM sessions WHERE token = ?").run(token);
 }
 
+export function extendSession(token, expiresAtMs) {
+  db.prepare("UPDATE sessions SET expires_at = ? WHERE token = ?").run(expiresAtMs, token);
+}
+
 export function deleteUserSessions(userId) {
   db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
 }

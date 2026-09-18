@@ -10,7 +10,7 @@ const TTL = 30 * DAY;
 // still works with Secure set).
 const COOKIE_SECURE = process.env.COOKIE_SECURE !== "0";
 
-const cookieOpts = () => ({ httpOnly: true, sameSite: "lax", path: "/", maxAge: TTL / 1000, secure: COOKIE_SECURE });
+const cookieOpts = () => ({ httpOnly: true, sameSite: "lax", path: "/", maxAge: TTL, secure: COOKIE_SECURE });
 
 function parseCookies(req) {
   const raw = req.headers.cookie || "";
@@ -26,7 +26,12 @@ function parseCookies(req) {
 // memory). The token only maps to a user id; the live user row is re-read on
 // each request, so role changes take effect immediately and the session never
 // caches stale privileges.
-export function currentUser(req) {
+//
+// Sliding renewal: active users never hit the 30-day wall. On every lookup, a
+// session running low (<= 1/3 TTL left) is extended back to a full TTL and the
+// cookie's maxAge is refreshed so the browser keeps it too. Nothing is revoked
+// — only genuinely idle sessions age out (1/3-TTL window widens on activity).
+export function currentUser(req, res) {
   const token = parseCookies(req)[COOKIE];
   if (!token) return null;
   const s = db.getSession(token);
@@ -35,11 +40,16 @@ export function currentUser(req) {
     db.deleteSession(token);
     return null;
   }
+  const remaining = s.expires_at - Date.now();
+  if (remaining <= TTL / 3 && res) {
+    db.extendSession(token, Date.now() + TTL);
+    res.cookie(COOKIE, token, cookieOpts());
+  }
   return db.getUserById(s.user_id) || null;
 }
 
 export function requireAuth(req, res, next) {
-  const user = currentUser(req);
+  const user = currentUser(req, res);
   if (!user) return res.status(401).json({ error: "sign in required" });
   req.user = user;
   next();
