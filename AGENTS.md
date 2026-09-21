@@ -311,6 +311,18 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
 
 ## Gotchas / known issues (read before editing)
 
+- **Stats payload caps sessions at 1000; streak & active days are capped client-side (TO RESOLVE).**
+  `db.getUserStats` sums totals over all commits but returns only
+  `sessions.slice(0, 1000)` (newest first). The profile's best-streak and
+  active-day counts are derived **client-side** from that capped list
+  (App.jsx `longestStreak` / `activeDays`), so past 1000 sessions they're
+  silently understated — for the owner *and* for visitors (same response,
+  same local computation). Plan (accepted, not yet built): compute
+  `bestStreak`/`activeDays` **server-side over all commits** in `getUserStats`,
+  and add **keyset pagination** (`?before=<ended_at>&limit=50`) so "Show more"
+  can fetch older sessions instead of slicing an in-memory list. A persisted
+  daily-streak counter was considered and rejected as redundant given the
+  server already scans every commit; derivation stays consistent.
 - **File System Access API only** — works in Chrome/Edge/Safari, not Firefox.
   No arbitrary file-path access in browsers; handles are per-origin and
   re-opening requires a user gesture (`requestPermission`). Firefox users get a
@@ -476,14 +488,27 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
   stats panel (books started, chapters done across books, reading time, longest
   consecutive reading-day streak, `Joined {month year} · N active days`), an
   **all-books reading heatmap** (reuses `Heatmap.jsx` fed with all sessions,
-  day cells filter the log) and a **filterable session log** (per-book select +
-  day filter from the heatmap; rows show book, end time, minutes, pages,
-  chapters; "Show more" pages +50). Any visitor can view it signed in or out
+  day cells filter the log) and a **GitHub-style activity timeline** for the
+  session log (vertical connector + dot per activity). Book-level grouping only:
+  contiguous sessions of the same book form one section (book icon + linked
+  title, session count, summed minutes/pages/chapters, "N d ago" stamp, time
+  window) and **every session is its own box** (`session-chapter-box`) whose
+  head shows the bookmark icon + chapter name of the session's *starting page*
+  (first `chapterEntries` entry; "Whole book" fallback) and whose row is a
+  shared CSS grid (clock · date · minutes · pages · chapters) so figures align
+  vertically across all boxes. No chapter-level grouping; "Show more" pages
+  +50; filter is a searchable combobox by
+  book — magnifier icon, type to filter with a pinned "Recent" section (last 5
+  chosen books, `book-tracker:recent-book-filter` in localStorage) under the
+  results, arrow-key nav, `✕` to reset, stacks with the heatmap day filter). Any visitor can view it signed in or out
   via public `GET /api/users/:username` (404 → "doesn't exist yet" state);
   the admin badge renders whenever the profile owner is admin, signed in or not.
   Data comes from `GET /api/me/stats` / the same stats computed publicly
   (returns up to the 1000 latest sessions, each with `pages`/`chapters`, plus
-  `totalChapters` = distinct (book, chapter-index) pairs via each book's TOC).
+  `totalChapters` = distinct (book, chapter-index) pairs via each book's TOC; each
+  session also carries `chapterEntries: [{i, title}]` (chapters touched, in TOC
+  order, titles whitespace-trimmed from the outline) so the client can show and
+  group by the chapter reached).
   `GET /api/auth/me` also returns `created_at` for the join date.
 - **Catalog hierarchy + roles (Phase D)**: migration v5 restructured the flat
   `books` table into `works` → `editions` → `fingerprints` (commits re-keyed to

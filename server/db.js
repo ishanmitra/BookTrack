@@ -792,6 +792,12 @@ export function getUserStats(userId) {
     row.minutes += mins;
     row.sessions += 1;
     if (!row.last_read_at || c.ended_at > row.last_read_at) row.last_read_at = c.ended_at;
+    const chapterEntries = [...chapterIdx]
+      .sort((a, b) => a - b)
+      .map((i) => ({
+        i,
+        title: (toc[i] && toc[i].title ? toc[i].title : `Chapter ${i + 1}`).replace(/^\s+/, "").trim(),
+      }));
     sessions.push({
       id: c.id,
       book_id: c.book_id,
@@ -803,6 +809,7 @@ export function getUserStats(userId) {
       minutes: mins,
       pages: pages,
       chapters: chapterIdx.size,
+      chapterEntries,
       read_pages: c.read_pages || [],
     });
   }

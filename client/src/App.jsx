@@ -11,6 +11,7 @@ import ChapterProgress from "./ChapterProgress";
 import BookWizard from "./BookWizard";
 import BookInfo from "./BookInfo";
 import AdminPage from "./AdminPage";
+import BookFilter from "./BookFilter";
 
 const STATUS_LABEL = {
   [STATUS.READY]: "✔ connected",
@@ -49,6 +50,89 @@ function timeAgo(iso) {
   const d = Math.floor(h / 24);
   if (d < 7) return `${d}d ago`;
   return new Date(iso).toLocaleDateString();
+}
+
+function fmtClockShort(iso) {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+function sumGroup(group) {
+  return group.sessions.reduce(
+    (acc, s) => ({
+      mins: acc.mins + (Number(s.minutes) || 0),
+      pages: acc.pages + (s.pages || 0),
+      chapters: acc.chapters + (s.chapters || 0),
+    }),
+    { mins: 0, pages: 0, chapters: 0 }
+  );
+}
+
+// The first (lowest-index, i.e. starting-page) chapter a session reached — it
+// labels that session's own box.
+function firstChapterTitle(s) {
+  return s.chapterEntries?.length ? s.chapterEntries[0].title : null;
+}
+
+function BookIcon({ className }) {
+  return (
+    <svg className={className} viewBox="1.5 2 13 11" width="14" height="14" fill="currentColor" aria-hidden="true" focusable="false">
+      <path d="M3 2h2.3a2.7 2.7 0 0 1 2.7 2.1V13a2.2 2.2 0 0 0-1.4-2.1H3a1.5 1.5 0 0 1-1.5-1.5V3.5a1.5 1.5 0 0 1 1.5-1.5Z" />
+      <path d="M13 2h-2.3a2.7 2.7 0 0 0-2.7 2.1V13a2.2 2.2 0 0 1 1.4-2.1H13a1.5 1.5 0 0 0 1.5-1.5V3.5a1.5 1.5 0 0 0-1.5-1.5Z" />
+    </svg>
+  );
+}
+
+function ChapterIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false">
+      <path d="M3.5 1.5h9v13L8 11.5l-4.5 3v-13Z" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// One book's timeline section: dot badge, action line (book link, session
+// count, summed figures, "when"), time window, then one box per session with
+// chapter label + the shared figure grid. Used on the profile log and the
+// home "Recent sessions".
+function SessionGroupRow({ b }) {
+  const first = b.sessions[0];
+  const last = b.sessions[b.sessions.length - 1];
+  const count = b.sessions.length;
+  const { mins, pages, chapters } = sumGroup(b);
+  const sameDay = new Date(first.started_at).toDateString() === new Date(last.ended_at).toDateString();
+  const windowText = sameDay
+    ? `${fmtClockShort(first.started_at)} – ${fmtClockShort(last.ended_at)}`
+    : `${new Date(first.started_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${new Date(last.ended_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+  return (
+    <li className="session-book">
+      <span className="session-log-dot" aria-hidden="true"><BookIcon /></span>
+      <div className="session-log-content">
+        <p className="session-log-action">
+          <Link className="session-log-book" to={"/book/" + b.slug}>{b.title || "Book"}</Link>
+          <span className="muted">{count === 1 ? "1 session" : count + " sessions"}</span>
+          <span className="session-log-aggregate muted">{fmtMins(mins)} · {pages} page{pages === 1 ? "" : "s"} · {chapters} chapter{chapters === 1 ? "" : "s"}</span>
+          <span className="session-log-when" title={new Date(last.ended_at).toLocaleString()}>{timeAgo(last.ended_at)}</span>
+        </p>
+        <span className="muted session-log-window">{windowText}</span>
+        <div className="session-chapter-boxes">
+          {b.sessions.map((s) => (
+            <div key={s.id} className="session-chapter-box">
+              <div className="session-box-row">
+                <ChapterIcon className="session-chapter-icon" />
+                <span className="session-chapter-title">{firstChapterTitle(s) || "Whole book"}</span>
+                <span className="session-box-clock">{fmtClockShort(s.ended_at)}</span>
+                <span className="session-box-date">{new Date(s.ended_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+                <span className="session-box-metric">{fmtMins(s.minutes)}</span>
+                <span className="session-box-metric">{s.pages} page{s.pages === 1 ? "" : "s"}</span>
+                <span className="session-box-metric">{s.chapters} chapter{s.chapters === 1 ? "" : "s"}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </li>
+  );
 }
 
 function StatView({ s }) {
@@ -452,9 +536,11 @@ export default function App() {
   }, [pUser, activeDays]);
 
   const hoursText = useMemo(() => {
-    const m = Number(pStats?.totalMinutes) || 0;
-    if (m < 60) return `${Math.round(m)}`;
-    return String(Math.round((m / 60) * 10) / 10).replace(/\.0$/, "");
+    const m = Math.round(Number(pStats?.totalMinutes) || 0);
+    if (m < 60) return `${m}m`;
+    const h = Math.floor(m / 60);
+    const r = m % 60;
+    return r ? `${h}h ${r}m` : `${h}h`;
   }, [pStats]);
 
   const profileSessions = useMemo(() => {
@@ -463,6 +549,41 @@ export default function App() {
     if (profileDay) list = list.filter((s) => String(s.started_at || "").slice(0, 10) === profileDay);
     return list;
   }, [pStats, filterBook, profileDay]);
+
+  // Book-level grouping for the timeline: contiguous sessions of the same book
+  // form one section. No chapter grouping — every session is its own box.
+  const sessionGroups = useMemo(() => {
+    const books = [];
+    for (const s of profileSessions.slice(0, sessionLimit)) {
+      const lastBook = books[books.length - 1];
+      if (lastBook && lastBook.slug === s.slug) lastBook.sessions.push(s);
+      else books.push({ slug: s.slug, title: s.title, sessions: [s] });
+    }
+    return books;
+  }, [profileSessions, sessionLimit]);
+
+  // Latest 10 sessions on the home page, grouped the same way (contiguous
+  // same-book sessions merge into one section).
+  const recentSessionGroups = useMemo(() => {
+    const books = [];
+    for (const s of (stats?.sessions || []).slice(0, 10)) {
+      const lastBook = books[books.length - 1];
+      if (lastBook && lastBook.slug === s.slug) lastBook.sessions.push(s);
+      else books.push({ slug: s.slug, title: s.title, sessions: [s] });
+    }
+    return books;
+  }, [stats]);
+
+  // Home "Recent sessions": same book-level grouping over the latest 10.
+  const recentGroups = useMemo(() => {
+    const books = [];
+    for (const s of stats?.sessions?.slice(0, 10) || []) {
+      const lastBook = books[books.length - 1];
+      if (lastBook && lastBook.slug === s.slug) lastBook.sessions.push(s);
+      else books.push({ slug: s.slug, title: s.title, sessions: [s] });
+    }
+    return books;
+  }, [stats]);
 
   const showNavbar = showLibrary || isProfile || (infoKey && !readKey) || isAdminPage;
 
@@ -553,7 +674,7 @@ export default function App() {
                   <div className="stat-row profile-stat-cells">
                     <div className="stat-cell"><strong>{pStats.books.length}</strong><span>books</span></div>
                     <div className="stat-cell"><strong>{pStats.totalChapters ?? 0}</strong><span>chapters</span></div>
-                    <div className="stat-cell"><strong>{hoursText}</strong><span>{Number(pStats.totalMinutes) < 60 ? "min read" : "h read"}</span></div>
+                    <div className="stat-cell"><strong>{hoursText}</strong><span>read time</span></div>
                     <div className="stat-cell"><strong>{longestStreak}</strong><span>best streak{longestStreak === 1 ? "" : "s"}</span></div>
                   </div>
                 </div>
@@ -566,34 +687,21 @@ export default function App() {
                 <div className="profile-sessions">
                   <h2>Sessions</h2>
                   <div className="session-filters">
-                    <select value={filterBook} onChange={(e) => setFilterBook(e.target.value)} aria-label="Filter by book">
-                      <option value="">All books</option>
-                      {pStats.books.map((b) => (
-                        <option key={b.book_id ?? b.slug} value={b.slug}>{b.title || b.slug}</option>
-                      ))}
-                    </select>
-                    {profileDay && <button className="ghost" onClick={() => setProfileDay(null)}>Clear day filter</button>}
+                    <BookFilter books={pStats.books} value={filterBook} onChange={setFilterBook} />
+                    {profileDay && <button className="link-btn" onClick={() => setProfileDay(null)}>Clear day filter</button>}
                     <span className="muted">{profileSessions.length} session{profileSessions.length === 1 ? "" : "s"}</span>
                   </div>
                   {profileSessions.length === 0 ? (
                     <p className="hint">No sessions match this filter.</p>
                   ) : (
-                    <ul className="session-log">
-                      {profileSessions.slice(0, sessionLimit).map((s) => (
-                        <li key={s.id} className="session-log-row">
-                          <Link className="ghost session-log-book" to={"/book/" + s.slug}>{s.title || "Book"}</Link>
-                          <div className="session-log-meta">
-                            <span className="muted">{new Date(s.ended_at).toLocaleString()}</span>
-                            <span className="muted">{fmtMins(s.minutes)}</span>
-                            <span className="muted">{s.pages} page{s.pages === 1 ? "" : "s"}</span>
-                            <span className="muted">{s.chapters} chapter{s.chapters === 1 ? "" : "s"}</span>
-                          </div>
-                        </li>
+                    <ol className="session-log">
+                      {sessionGroups.map((b) => (
+                        <SessionGroupRow key={b.sessions[0].id} b={b} />
                       ))}
-                    </ul>
+                    </ol>
                   )}
                   {profileSessions.length > sessionLimit && (
-                    <button className="ghost" onClick={() => setSessionLimit((n) => n + 50)}>Show more</button>
+                    <button className="link-btn" onClick={() => setSessionLimit((n) => n + 50)}>Show more</button>
                   )}
                 </div>
               </>
@@ -731,16 +839,11 @@ export default function App() {
           {user && stats?.sessions?.length > 0 && (
             <section className="recent-sessions">
               <h2>Recent sessions</h2>
-              <ul className="recent-sessions-list">
-                {stats.sessions.slice(0, 10).map((s) => (
-                  <li key={s.id} className="recent-session">
-                    <Link className="ghost" to={"/book/" + s.slug}>{s.title || "Book"}</Link>
-                    <span className="muted">{timeAgo(s.ended_at)}</span>
-                    <span className="muted">{fmtMins(s.minutes)}</span>
-                    <span className="muted">{s.read_pages?.length || 0} pages</span>
-                  </li>
+              <ol className="session-log">
+                {recentSessionGroups.map((b) => (
+                  <SessionGroupRow key={b.sessions[0].id} b={b} />
                 ))}
-              </ul>
+              </ol>
             </section>
           )}
         </section>
