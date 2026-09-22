@@ -1,0 +1,39 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# New > Blueprint (Blueprints are private in this repo) > connect this repo.
+# The schema (tables/indexes) is created automatically on first boot by
+# server/db.js migrations against whatever TURSO_DATABASE_URL points at.
+services:
+  - type: web
+    name: book-tracker
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: node server/index.js
+    healthCheckPath: /api/books
+    envVars:
+      # Node 22 matches local dev (@libsql/client needs 18+).
+      - key: NODE_VERSION
+        value: "22"
+      # Remote libsql/Turso DB. Leave TURSO_DATABASE_URL unset to run on the
+      # embedded local engine (data/reader.db) if you ever deploy without Turso.
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+      # GitHub OAuth app: callback must be https://<service>.onrender.com/api/auth/github/callback
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      # Comma-separated numeric GitHub ids and/or logins.
+      - key: GITHUB_ADMIN_IDS
+        sync: false
+      - key: GITHUB_SUPER_ADMIN_IDS
+        sync: false
+      # Where to land after OAuth login. Keep "/" (the app root).
+      - key: REDIRECT_URL
+        value: /
+      # Same-origin deployment doesn't need this; set it to the service origin
+      # only if you ever serve the client from a different host than /api.
+      - key: CLIENT_ORIGIN
+        sync: false
