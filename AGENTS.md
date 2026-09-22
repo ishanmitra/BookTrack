@@ -33,7 +33,7 @@ Key design answers already decided:
 ```
 book-tracker/
 ├── package.json          # npm workspaces; npm run dev runs both
-├── server/               # Express + SQLite (better-sqlite3)
+├── server/               # Express + libSQL (async, @libsql/client)
 │   ├── index.js          # REST API
 │   └── db.js             # schema + prepared statements (data/reader.db)
 └── client/               # React + Vite + pdfjs-dist
@@ -371,6 +371,19 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
   random `state` with a 10-minute expiry to prevent CSRF; the callback URL
   must be `<host>/api/auth/github/callback` (in dev it routes through the
   Vite `/api` proxy on `:5173`).
+- **DB driver is the async libSQL client, not better-sqlite3.** `server/db.js`
+  uses `@libsql/client` (direct, no adapter). Local dev defaults to the
+  on-disk DB via a `file:` URL (embedded engine); set `TURSO_DATABASE_URL`
+  (+ optional `TURSO_AUTH_TOKEN`) to point at Turso. Every `db.*` function is
+  **async** and every Express route that touches it is `async` and wrapped in
+  `h()` (`server/index.js`) so rejections reach the error middleware (Express 4
+  doesn't catch rejected handlers). Row shapes differ per driver: the embedded
+  client returns objects, the Hrana (Turso) client returns arrays — `toObjs()`
+  normalizes both. `lastInsertRowid` can be a bigint and is coerced with
+  `Number()`. `PRAGMA journal_mode/foreign_keys` are best-effort (no-ops
+  remotely); `deleteUser` deletes commits+sessions explicitly rather than
+  relying on the FK cascade. Call params accept varargs **or** one array
+  (`run(sql, a, b)` / `run(sql, [a, b])`) via `normalizeArgs`.
 - **Commits' JSON columns must be parsed server-side.** SQLite stores `pages`
   /`read_pages` as TEXT; `listCommits`/`insertCommit` must go through
   `parseCommit` (JSON.parse), or the client receives strings and

@@ -15,6 +15,13 @@ const CLIENT_ORIGIN =
     .map((s) => s.trim())
     .filter(Boolean);
 
+// Express 4 doesn't forward rejected promises from async handlers, so route
+// handlers are wrapped: any rejection lands in the error middleware below
+// instead of hanging the request.
+const h = (fn) => (req, res, next) => {
+  fn(req, res, next).catch(next);
+};
+
 const app = express();
 app.set("trust proxy", 1);
 app.use(
@@ -71,11 +78,11 @@ const REDIRECT_URL = process.env.REDIRECT_URL || "/";
 
 // Phase D roles: super_admin > admin > member. The env-pinned account fills
 // the super-admin vacancy at boot (self-heal); see db.bootstrapSuperAdmin.
-db.bootstrapSuperAdmin(SUPER_ADMIN_GITHUB_IDS);
+await db.bootstrapSuperAdmin(SUPER_ADMIN_GITHUB_IDS);
 
 // Persistent sessions: sweep expired rows on boot + hourly (one indexed DELETE).
-db.pruneExpiredSessions();
-setInterval(() => db.pruneExpiredSessions(), 60 * 60 * 1000).unref();
+await db.pruneExpiredSessions();
+setInterval(() => db.pruneExpiredSessions().catch(() => {}), 60 * 60 * 1000).unref();
 
 const pendingStates = new Map();
 
@@ -93,31 +100,43 @@ function isAdmin(user) {
 // The session stores only the user id; role-sensitive paths re-read the live
 // row from the DB (auth.currentUser returns it). Passing `res` lets renewal
 // apply: the session is extended and the cookie re-set when it runs low.
-function freshUser(req, res) {
+async function freshUser(req, res) {
   return auth.currentUser(req, res);
 }
 
-function requireAuth(req, res, next) {
-  const user = freshUser(req, res);
-  if (!user) return res.status(401).json({ error: "sign in required" });
-  req.user = user;
-  next();
+async function requireAuth(req, res, next) {
+  try {
+    const user = await freshUser(req, res);
+    if (!user) return res.status(401).json({ error: "sign in required" });
+    req.user = user;
+    next();
+  } catch (err) {
+    next(err);
+  }
 }
 
-function requireAdmin(req, res, next) {
-  const user = freshUser(req, res);
-  if (!user) return res.status(401).json({ error: "sign in required" });
-  if (!isAdmin(user)) return res.status(403).json({ error: "admin required" });
-  req.user = user;
-  next();
+async function requireAdmin(req, res, next) {
+  try {
+    const user = await freshUser(req, res);
+    if (!user) return res.status(401).json({ error: "sign in required" });
+    if (!isAdmin(user)) return res.status(403).json({ error: "admin required" });
+    req.user = user;
+    next();
+  } catch (err) {
+    next(err);
+  }
 }
 
-function requireSuperAdmin(req, res, next) {
-  const user = freshUser(req, res);
-  if (!user) return res.status(401).json({ error: "sign in required" });
-  if (user.role !== "super_admin") return res.status(403).json({ error: "super admin required" });
-  req.user = user;
-  next();
+async function requireSuperAdmin(req, res, next) {
+  try {
+    const user = await freshUser(req, res);
+    if (!user) return res.status(401).json({ error: "sign in required" });
+    if (user.role !== "super_admin") return res.status(403).json({ error: "super admin required" });
+    req.user = user;
+    next();
+  } catch (err) {
+    next(err);
+  }
 }
 
 app.get("/api/auth/github", (req, res) => {
@@ -129,7 +148,7 @@ app.get("/api/auth/github", (req, res) => {
   res.redirect(`https://github.com/login/oauth/authorize?${params}`);
 });
 
-app.get("/api/auth/github/callback", async (req, res) => {
+app.get("/api/auth/github/callback", h(async (req, res) => {
   const { code, state, error } = req.query;
   const st = pendingStates.get(state);
   pendingStates.delete(state);
@@ -149,7 +168,7 @@ app.get("/api/auth/github/callback", async (req, res) => {
     });
     const me = await meRes.json();
     if (!me.id) return res.status(400).send("github user lookup failed");
-    const user = db.getOrCreateGithubUser({
+    const user = await db.getOrCreateGithubUser({
       githubId: String(me.id),
       displayName: me.name || me.login,
       avatarUrl: me.avatar_url,
@@ -157,74 +176,74 @@ app.get("/api/auth/github/callback", async (req, res) => {
       adminIds: ADMIN_GITHUB_IDS,
       superAdminIds: SUPER_ADMIN_GITHUB_IDS,
     });
-    auth.startSession(res, user);
+    await auth.startSession(res, user);
     res.redirect(REDIRECT_URL);
   } catch (err) {
     console.error("github callback error", err);
     res.status(500).send("authentication error");
   }
-});
+}));
 
-app.get("/api/auth/me", (req, res) => {
-  const u = freshUser(req, res);
+app.get("/api/auth/me", h(async (req, res) => {
+  const u = await freshUser(req, res);
   res.json({
     user: u
       ? { id: u.id, display_name: u.display_name, username: u.username, avatar_url: u.avatar_url, role: u.role, is_admin: u.role !== "member", created_at: u.created_at }
       : null,
   });
-});
+}));
 
-app.post("/api/auth/logout", (req, res) => {
-  auth.endSession(req, res);
+app.post("/api/auth/logout", h(async (req, res) => {
+  await auth.endSession(req, res);
   res.json({ ok: true });
-});
+}));
 
 // ── catalog ──────────────────────────────────────────────────────────────────
 // The catalog is a three-level hierarchy (work → editions → fingerprints).
 // Registration is shared: members/anonymous land in a pending state for
 // admin confirmation; admins/super admins bind immediately.
 
-app.get("/api/books", (_req, res) => {
-  res.json(db.listBooks().map(db.parseBook));
-});
+app.get("/api/books", h(async (_req, res) => {
+  res.json((await db.listBooks()).map(db.parseBook));
+}));
 
-app.get("/api/books/pending", requireAdmin, (_req, res) => {
-  res.json(db.listPendingFingerprints());
-});
+app.get("/api/books/pending", requireAdmin, h(async (_req, res) => {
+  res.json(await db.listPendingFingerprints());
+}));
 
-app.get("/api/books/retired", requireAdmin, (_req, res) => {
-  res.json(db.listRetiredWorks().map(db.parseBook));
-});
+app.get("/api/books/retired", requireAdmin, h(async (_req, res) => {
+  res.json((await db.listRetiredWorks()).map(db.parseBook));
+}));
 
-app.get("/api/books/:id", (req, res) => {
-  const book = db.parseBook(db.getBook(Number(req.params.id)));
+app.get("/api/books/:id", h(async (req, res) => {
+  const book = db.parseBook(await db.getBook(Number(req.params.id)));
   if (!book) return res.status(404).json({ error: "book not found" });
   res.json(book);
-});
+}));
 
-app.get("/api/book/:slug", (req, res) => {
-  const book = db.parseBook(db.getBookBySlug(req.params.slug));
+app.get("/api/book/:slug", h(async (req, res) => {
+  const book = db.parseBook(await db.getBookBySlug(req.params.slug));
   if (!book) return res.status(404).json({ error: "book not found" });
   res.json(book);
-});
+}));
 
-app.post("/api/books", (req, res) => {
+app.post("/api/books", h(async (req, res) => {
   const { fingerprint, title, author, edition, pageCount, slug, toc } = req.body ?? {};
   if (!fingerprint) return res.status(400).json({ error: "fingerprint required" });
-  const role = freshUser(req, res)?.role || "member";
-  const book = db.parseBook(db.registerBook(fingerprint, { title, author, edition, pageCount, slug, toc }, role));
+  const role = (await freshUser(req, res))?.role || "member";
+  const book = db.parseBook(await db.registerBook(fingerprint, { title, author, edition, pageCount, slug, toc }, role));
   res.json(book);
-});
+}));
 
-app.patch("/api/books/:id", requireAdmin, (req, res) => {
+app.patch("/api/books/:id", requireAdmin, h(async (req, res) => {
   const { title, author, edition, pageCount, toc, slug } = req.body ?? {};
-  const book = db.parseBook(db.updateBook(Number(req.params.id), { title, author, edition, pageCount, toc, slug }));
+  const book = db.parseBook(await db.updateBook(Number(req.params.id), { title, author, edition, pageCount, toc, slug }));
   if (!book) return res.status(404).json({ error: "book not found" });
   res.json(book);
-});
+}));
 
-app.delete("/api/books/:id", requireAdmin, (req, res) => {
-  const result = db.deleteBook(Number(req.params.id));
+app.delete("/api/books/:id", requireAdmin, h(async (req, res) => {
+  const result = await db.deleteBook(Number(req.params.id));
   if (!result) return res.status(404).json({ error: "book not found" });
   res.json({
     ok: true,
@@ -234,69 +253,79 @@ app.delete("/api/books/:id", requireAdmin, (req, res) => {
         ? "This book has reading history, so it was retired instead of deleted. History and slug are kept; it's hidden from listings until reactivated."
         : "Book deleted.",
   });
-});
+}));
 
 // Bind a pending fingerprint (member/anonymous uploads) — admin confirmation.
 // Optional body updates the work's edition before approval.
-app.post("/api/books/bind/:fingerprintId", requireAdmin, (req, res) => {
+app.post("/api/books/bind/:fingerprintId", requireAdmin, h(async (req, res) => {
   const { toc, pageCount, edition } = req.body ?? {};
-  const book = db.parseBook(db.bindFingerprint(Number(req.params.fingerprintId), { toc, pageCount, editionLabel: edition }));
+  const book = db.parseBook(await db.bindFingerprint(Number(req.params.fingerprintId), { toc, pageCount, editionLabel: edition }));
   if (!book) return res.status(404).json({ error: "fingerprint not found" });
   res.json(book);
-});
+}));
 
-app.post("/api/books/reactivate/:id", requireAdmin, (req, res) => {
-  const book = db.parseBook(db.reactivateWork(Number(req.params.id)));
+app.post("/api/books/reactivate/:id", requireAdmin, h(async (req, res) => {
+  const book = db.parseBook(await db.reactivateWork(Number(req.params.id)));
   if (!book) return res.status(404).json({ error: "work not found" });
   res.json(book);
-});
+}));
 
 // ── commits — authenticated session required (no anonymous commits) ──────────
 // Commits attach to the exact fingerprint read (optional in the payload so
 // existing clients keep working against the work's primary fingerprint).
-app.post("/api/books/:id/commits", requireAuth, (req, res) => {
+app.post("/api/books/:id/commits", requireAuth, h(async (req, res) => {
   const bookId = Number(req.params.id);
   const { sessionId, deviceId, startedAt, endedAt, secondsPerPage, readPages, fingerprint } = req.body ?? {};
   if (!deviceId || !startedAt || !endedAt) return res.status(400).json({ error: "deviceId, startedAt, endedAt required" });
   const seconds = Object.values(secondsPerPage ?? {}).reduce((a, b) => a + (Number(b) || 0), 0);
-  const commit = db.insertCommit(bookId, {
-    userId: req.user.id,
-    sessionId: sessionId || randomUUID(),
-    deviceId,
-    startedAt,
-    endedAt,
-    minutes: Math.round((seconds / 60) * 10) / 10,
-    pages: JSON.stringify(secondsPerPage ?? {}),
-    readPages: JSON.stringify(readPages ?? []),
-    fingerprint: fingerprint || null,
-  });
-  res.status(201).json(commit);
-});
+  try {
+    const commit = await db.insertCommit(bookId, {
+      userId: req.user.id,
+      sessionId: sessionId || randomUUID(),
+      deviceId,
+      startedAt,
+      endedAt,
+      minutes: Math.round((seconds / 60) * 10) / 10,
+      pages: JSON.stringify(secondsPerPage ?? {}),
+      readPages: JSON.stringify(readPages ?? []),
+      fingerprint: fingerprint || null,
+    });
+    res.status(201).json(commit);
+  } catch (err) {
+    // A commit for a book that no longer has a bound fingerprint can never
+    // succeed — surface 404 so the client drops it from its queue instead of
+    // retrying forever.
+    if (err?.message === "book has no bound fingerprint") {
+      return res.status(404).json({ error: "book has no bound fingerprint" });
+    }
+    throw err;
+  }
+}));
 
 // Stats across the signed-in user's own commits
-app.get("/api/me/stats", requireAuth, (req, res) => {
-  res.json(db.getUserStats(req.user.id));
-});
+app.get("/api/me/stats", requireAuth, h(async (req, res) => {
+  res.json(await db.getUserStats(req.user.id));
+}));
 
 // Public profile — anyone (signed in or not) can view a user's reading stats.
 // Only a boolean admin flag is exposed: super_admin renders as "admin".
-app.get("/api/users/:username", (req, res) => {
-  const u = db.getUserByUsername(req.params.username);
+app.get("/api/users/:username", h(async (req, res) => {
+  const u = await db.getUserByUsername(req.params.username);
   if (!u) return res.status(404).json({ error: "user not found" });
   res.json({
     user: { id: u.id, display_name: u.display_name, username: u.username, avatar_url: u.avatar_url, is_admin: u.role !== "member", created_at: u.created_at },
-    stats: db.getUserStats(u.id),
+    stats: await db.getUserStats(u.id),
   });
-});
+}));
 
-app.get("/api/books/:id/commits", requireAuth, (req, res) => {
-  res.json(db.listCommits(Number(req.params.id), req.user.id));
-});
+app.get("/api/books/:id/commits", requireAuth, h(async (req, res) => {
+  res.json(await db.listCommits(Number(req.params.id), req.user.id));
+}));
 
-app.delete("/api/books/:id/commits", requireAuth, (req, res) => {
-  db.deleteBookCommits(Number(req.params.id), req.user.id);
+app.delete("/api/books/:id/commits", requireAuth, h(async (req, res) => {
+  await db.deleteBookCommits(Number(req.params.id), req.user.id);
   res.json({ ok: true });
-});
+}));
 
 // ── role management (super admin only) ───────────────────────────────────────
 app.get("/api/admin/role", requireAdmin, (req, res) => {
@@ -305,42 +334,50 @@ app.get("/api/admin/role", requireAdmin, (req, res) => {
   res.json({ role: req.user.role });
 });
 
-app.get("/api/admin/users", requireSuperAdmin, (_req, res) => {
-  res.json(db.listUsers());
-});
+app.get("/api/admin/users", requireSuperAdmin, h(async (_req, res) => {
+  res.json(await db.listUsers());
+}));
 
-app.patch("/api/admin/users/:id/role", requireSuperAdmin, (req, res) => {
+app.patch("/api/admin/users/:id/role", requireSuperAdmin, h(async (req, res) => {
   const role = req.body?.role;
   if (role !== "admin" && role !== "member") return res.status(400).json({ error: "role must be 'admin' or 'member'" });
-  const user = db.setUserRole(Number(req.params.id), role);
+  const user = await db.setUserRole(Number(req.params.id), role);
   if (!user) return res.status(400).json({ error: "cannot change that user's role" });
   res.json({ ok: true, user: { id: user.id, role: user.role } });
-});
+}));
 
 // Swap authority: the incumbent super admin designates a successor, then
 // demotes to admin — in a single transaction (see db.transferSuperAdmin).
-app.post("/api/admin/transfer", requireSuperAdmin, (req, res) => {
+app.post("/api/admin/transfer", requireSuperAdmin, h(async (req, res) => {
   const userId = Number(req.body?.userId);
   if (!Number.isInteger(userId)) return res.status(400).json({ error: "userId required" });
   try {
-    db.transferSuperAdmin(req.user.id, userId);
+    await db.transferSuperAdmin(req.user.id, userId);
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
   res.json({ ok: true });
-});
+}));
 
 // ── account deletion ─────────────────────────────────────────────────────────
 // Self-service account removal. The super admin must swap authority first —
 // the server refuses until the role has been transferred.
-app.delete("/api/me", requireAuth, (req, res) => {
+app.delete("/api/me", requireAuth, h(async (req, res) => {
   if (req.user.role === "super_admin") {
     return res.status(400).json({ error: "transfer the super admin role to another user before removing your account" });
   }
-  const sessionUser = db.getUserById(req.user.id);
-  if (sessionUser) db.deleteUser(sessionUser.id);
-  auth.endSession(req, res);
+  const sessionUser = await db.getUserById(req.user.id);
+  if (sessionUser) await db.deleteUser(sessionUser.id);
+  await auth.endSession(req, res);
   res.json({ ok: true, deleted: true });
+}));
+
+// ── error handling vs. SPA fallback ───────────────────────────────────────────
+// Express 4 route handlers don't surface rejected promises, so the `h` wrapper
+// forwards them here instead of leaving the request hanging.
+app.use((err, _req, res, _next) => {
+  console.error(err);
+  res.status(500).json({ error: "internal error" });
 });
 
 // SPA fallback — serve the built client for non-API routes so browser

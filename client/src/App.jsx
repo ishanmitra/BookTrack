@@ -312,7 +312,15 @@ export default function App() {
       try {
         await api.pushCommit(q.bookId, q);
         await storage.removeQueuedCommit(q.sessionId);
-      } catch {
+      } catch (err) {
+        // A 4xx (other than an expired 401 session) means this commit can never
+        // succeed — e.g. its book id no longer exists after a delete. Drop it
+        // and keep flushing the rest instead of being pinned behind it forever.
+        // Network/5xx/401 stay queued and retry on the next flush.
+        if (err?.status && err.status >= 400 && err.status < 500 && err.status !== 401) {
+          await storage.removeQueuedCommit(q.sessionId);
+          continue;
+        }
         break;
       }
     }
