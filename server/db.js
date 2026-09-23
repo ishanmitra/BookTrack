@@ -168,27 +168,56 @@ async function columnExists(table, column) {
 }
 
 const SCHEMA_VERSION = 6;
+
+// Schema-version marker. SQLite's PRAGMA user_version is the natural carrier,
+// but Turso (libsql server) refuses "PRAGMA user_version = N", so we fall back
+// to an app_meta table there and treat the two as one source of truth. Reads
+// prefer the pragma (existing local DBs already track 1-6 there), then the
+// table (writes landed there on a remote DB).
+async function getSchemaVersion() {
+  let v = 0;
+  try {
+    const res = await _exec(client, "PRAGMA user_version", []);
+    v = Number(res.rows[0]?.[0] ?? res.rows[0]?.user_version ?? 0) || 0;
+  } catch {}
+  if (v > 0) return v;
+  try {
+    const row = await get("SELECT value FROM app_meta WHERE key = 'schema_version'");
+    return Number(row?.value) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function setSchemaVersion(n) {
+  try {
+    await execMulti(`PRAGMA user_version = ${n}`);
+    return;
+  } catch {}
+  await execMulti("CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+  await run("INSERT INTO app_meta (key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", String(n));
+}
+
 async function migrate() {
-  const res = await _exec(client, "PRAGMA user_version", []);
-  let version = Number(res.rows[0]?.[0] ?? res.rows[0]?.user_version ?? 0) || 0;
+  let version = await getSchemaVersion();
   if (version < 1) {
     await ensureColumn("commits", "user_id", "user_id INTEGER REFERENCES users(id)");
     if (await tableExists("commits")) {
       await execMulti("CREATE INDEX IF NOT EXISTS idx_commits_user ON commits(user_id)");
       if (await columnExists("commits", "book_id")) await execMulti("CREATE INDEX IF NOT EXISTS idx_commits_book ON commits(book_id)");
     }
-    await execMulti(`PRAGMA user_version = 1`);
+    await setSchemaVersion(1);
   }
   if (version < 2) {
     await ensureColumn("users", "username", "username TEXT");
-    await execMulti(`PRAGMA user_version = 2`);
+    await setSchemaVersion(2);
   }
   if (version < 3) {
     // SQLite can't ADD COLUMN with a UNIQUE constraint, so use a plain
     // column + a separate unique index.
     await ensureColumn("books", "slug", "slug TEXT");
     if (await tableExists("books")) await execMulti("CREATE UNIQUE INDEX IF NOT EXISTS idx_books_slug ON books(slug)");
-    await execMulti(`PRAGMA user_version = 3`);
+    await setSchemaVersion(3);
   }
   if (version < 4) {
     // Exercises never shipped; drop the dead column entirely.
@@ -196,7 +225,7 @@ async function migrate() {
       const cols = (await tableInfo("books")).map((c) => c.name);
       if (cols.includes("exercises")) await client.execute({ sql: "ALTER TABLE books DROP COLUMN exercises", args: [] });
     }
-    await execMulti(`PRAGMA user_version = 4`);
+    await setSchemaVersion(4);
   }
   if (version < 5) await migrationV5();
   if (version < 6) await migrationV6();
@@ -217,7 +246,7 @@ async function migrationV6() {
     CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
   `);
-  await execMulti(`PRAGMA user_version = 6`);
+  await setSchemaVersion(6);
 }
 
 // The Phase D restructure. Run on startup for pre-v5 DBs; a fresh DB already
@@ -310,7 +339,7 @@ async function migrationV5() {
   if (await columnExists("users", "is_admin")) {
     await client.execute({ sql: "ALTER TABLE users DROP COLUMN is_admin", args: [] });
   }
-  await execMulti(`PRAGMA user_version = 5`);
+  await setSchemaVersion(5);
   await bootstrapSuperAdmin(superAdminIds());
 }
 
