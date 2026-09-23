@@ -52,10 +52,6 @@ BookTrack tracks how you actually read technical books. Reading sessions are mod
 
 ## Contributing
 
-BookTrack is **WIP and single-maintainer** — the API and UI can and will shift. All contributions are welcome: bug reports, feature ideas, and PRs.
-
-Pick an item from the **Roadmap** or an open issue — good targets are clearly-scoped bugs and the phase ideas above.
-
 ### Running the project locally
 
 ```bash
