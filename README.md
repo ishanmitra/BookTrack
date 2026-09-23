@@ -1,17 +1,17 @@
 # BookTrack
 
-A GitHub-like platform for tracking reading and coding progress through technical programming books (e.g. *The C Programming Language*, *The Go Programming Language*).
+A GitHub-like platform for tracking reading and coding progress through technical programming books.
 
 ![Status: work in progress](https://img.shields.io/badge/status-Work%20in%20progress-yellow)
 ![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen?logo=github)
 ![License](https://img.shields.io/github/license/ishanmitra/BookTrack)
 ![Top language](https://img.shields.io/github/languages/top/ishanmitra/BookTrack)
 
-| Tech stack | |
-|---|---|
-| [![Node](https://img.shields.io/badge/Node.js%2018%2B-339933?logo=nodedotjs&logoColor=fff)](https://nodejs.org) [![Express](https://img.shields.io/badge/Express-000000?logo=express&logoColor=white)](https://expressjs.com) | API server |
-| [![React](https://img.shields.io/badge/React-61DAFB?logo=react&logoColor=000)](https://react.dev) [![Vite](https://img.shields.io/badge/Vite-646CFF?logo=vite&logoColor=fff)](https://vite.dev) | Web client (PDF viewer via pdf.js) |
-| [![SQLite](https://img.shields.io/badge/libSQL%2FSQLite--Turso-003B57?logo=sqlite&logoColor=fff)](https://turso.tech) | Storage — local `file:` in dev, Turso in production |
+![Node.js 18+](https://img.shields.io/badge/Node.js%2018%2B-339933?logo=nodedotjs&logoColor=fff)
+![Express](https://img.shields.io/badge/Express-000000?logo=express&logoColor=white)
+![React](https://img.shields.io/badge/React-61DAFB?logo=react&logoColor=000)
+![Vite](https://img.shields.io/badge/Vite-646CFF?logo=vite&logoColor=fff)
+![libSQL/SQLite · Turso](https://img.shields.io/badge/libSQL%2FSQLite--Turso-003B57?logo=sqlite&logoColor=fff)
 
 ## What is it?
 
