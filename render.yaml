@@ -4,7 +4,7 @@
 # server/db.js migrations against whatever TURSO_DATABASE_URL points at.
 services:
   - type: web
-    name: book-tracker
+    name: booktrack
     runtime: node
     plan: free
     buildCommand: npm ci && npm run build
