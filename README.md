@@ -64,14 +64,3 @@ npm run dev        # server :4000 + client :5173 (vite proxies /api -> :4000)
 ```
 
 No database setup needed — the server auto-creates and migrates `data/reader.db` (the local SQLite/libSQL engine) on first boot. `data/` is git-ignored.
-
-**Optional env**: copy `server/.env.example` → `server/.env`. Set `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` (+ your id in `GITHUB_SUPER_ADMIN_IDS`) to enable sign-in and become super admin locally. Without OAuth everything works read-only. Set `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN` to point at a Turso/remote DB instead of the local file.
-
-### Opening a PR
-
-- License is MIT (see [`LICENSE`](LICENSE)).
-- Verify with `npm run build` before opening a PR (there is no test suite yet); smoke-test in a Chromium browser.
-
-## License
-
-[MIT](LICENSE) © 2026 Ishan Mitra
