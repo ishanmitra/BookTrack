@@ -10,6 +10,15 @@ services:
     buildCommand: npm ci && npm run build
     startCommand: node server/index.js
     healthCheckPath: /api/books
+    # Docs/meta-only changes (issue templates, workflows, markdown) can't change
+    # the build or the runtime, so they skip auto-deploys. Manual deploys are
+    # unaffected. Note: applying this filter triggers one last deploy.
+    buildFilter:
+      ignoredPaths:
+        - .github/**
+        - "**/*.md"
+        - LICENSE
+        - .gitignore
     envVars:
       # Node 22 matches local dev (@libsql/client needs 18+).
       - key: NODE_VERSION
