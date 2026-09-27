@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import "dotenv/config";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import cors from "cors";
@@ -104,6 +105,23 @@ async function freshUser(req, res) {
   return auth.currentUser(req, res);
 }
 
+// The one public shape of a user, shared by GET /api/auth/me, the public
+// profile, and the session block inlined into the app shell — so they cannot
+// drift. Roles are internal: callers get the `is_admin` boolean only, and the
+// raw role is read from the live row by the server-side permission checks
+// (or from /api/admin/role for the admin console).
+function publicUser(u) {
+  if (!u) return null;
+  return {
+    id: u.id,
+    display_name: u.display_name,
+    username: u.username,
+    avatar_url: u.avatar_url,
+    is_admin: u.role !== "member",
+    created_at: u.created_at,
+  };
+}
+
 async function requireAuth(req, res, next) {
   try {
     const user = await freshUser(req, res);
@@ -186,11 +204,11 @@ app.get("/api/auth/github/callback", h(async (req, res) => {
 
 app.get("/api/auth/me", h(async (req, res) => {
   const u = await freshUser(req, res);
-  res.json({
-    user: u
-      ? { id: u.id, display_name: u.display_name, username: u.username, avatar_url: u.avatar_url, role: u.role, is_admin: u.role !== "member", created_at: u.created_at }
-      : null,
-  });
+  // Per-user response: never let a shared cache hold it, and key any
+  // downstream cache on the cookie that produced it.
+  res.set("Cache-Control", "no-store");
+  res.set("Vary", "Cookie");
+  res.json({ user: publicUser(u) });
 }));
 
 app.post("/api/auth/logout", h(async (req, res) => {
@@ -313,7 +331,7 @@ app.get("/api/users/:username", h(async (req, res) => {
   const u = await db.getUserByUsername(req.params.username);
   if (!u) return res.status(404).json({ error: "user not found" });
   res.json({
-    user: { id: u.id, display_name: u.display_name, username: u.username, avatar_url: u.avatar_url, is_admin: u.role !== "member", created_at: u.created_at },
+    user: publicUser(u),
     stats: await db.getUserStats(u.id),
   });
 }));
@@ -372,21 +390,66 @@ app.delete("/api/me", requireAuth, h(async (req, res) => {
   res.json({ ok: true, deleted: true });
 }));
 
-// ── error handling vs. SPA fallback ───────────────────────────────────────────
-// Express 4 route handlers don't surface rejected promises, so the `h` wrapper
-// forwards them here instead of leaving the request hanging.
+// ── app shell ─────────────────────────────────────────────────────────────────
+// The shell inlines the resolved session so the client's first render already
+// knows who the user is — otherwise a hard load paints the signed-out hero and
+// then flips, because identity can only come from the httpOnly cookie
+// (see AGENTS.md). The block is a `type="application/json"` data block, not an
+// executable script, so it is not subject to `script-src 'self'` and needs no
+// CSP nonce.
+//
+// `<` is escaped to \u003c: JSON-valid, and it stops any "</script>" in a
+// display name from closing the element early.
+function escapeJsonForHtml(s) {
+  return s.replace(/</g, "\\u003c");
+}
+
+const clientDist = path.join(__dirname, "..", "client", "dist");
+
+// The shell is per-user now, so it must never be stored or revalidated:
+// `no-store` stops the browser sending a conditional request for it, and
+// `Vary: Cookie` keeps any intermediary from serving one reader's session
+// markup to another. (Without both, send's default ETag — derived from the
+// on-disk file, identical for every user — would let a 304 replay stale
+// session HTML after a sign-out/sign-in on the same browser.)
+function sendShell(req, res) {
+  h(async (req, res) => {
+    const u = await freshUser(req, res);
+    let html = await readFile(path.join(clientDist, "index.html"), "utf-8");
+    const payload = escapeJsonForHtml(JSON.stringify({ user: publicUser(u) }));
+    const block = `<script type="application/json" id="bt-session">${payload}</script>`;
+    // Before the entry module, so the value is in the DOM by the time the
+    // bundle runs — but late enough not to compete with the stylesheet.
+    html = html.includes("</head>")
+      ? html.replace("</head>", `  ${block}\n  </head>`)
+      : html.replace(/<body([^>]*)>/, `<body$1>\n  ${block}`);
+    res.set("Content-Type", "text/html; charset=utf-8");
+    res.set("Cache-Control", "no-store");
+    res.set("Vary", "Cookie");
+    res.send(html);
+  })(req, res);
+}
+
+// `/` and `/index.html` are handled here rather than by express.static, so the
+// session block is never bypassed by the raw file.
+app.get(["/", "/index.html"], sendShell);
+
+// Assets are content-hashed and user-independent, so they stay cacheable.
+app.use(express.static(clientDist, { index: false }));
+
+// SPA fallback — serve the built shell for non-API routes so browser
+// refresh works on client-side routes (/user/:username, /book/:key, /admin).
+app.get("*", (req, res) => {
+  if (req.path.startsWith("/api")) return res.status(404).json({ error: "not found" });
+  sendShell(req, res);
+});
+
+// Error handling comes last: Express only reaches a 4-arg handler registered
+// *after* the failing route, and `h()` forwards rejected promises (including
+// from sendShell) here rather than leaving the request hanging.
 app.use((err, _req, res, _next) => {
   console.error(err);
   res.status(500).json({ error: "internal error" });
-});
-
-// SPA fallback — serve the built client for non-API routes so browser
-// refresh works on client-side routes (/user/:username, /book/:key, /admin).
-const clientDist = path.join(__dirname, "..", "client", "dist");
-app.use(express.static(clientDist));
-app.get("*", (req, res) => {
-  if (req.path.startsWith("/api")) return res.status(404).json({ error: "not found" });
-  res.sendFile(path.join(clientDist, "index.html"));
 });
 
 const port = process.env.PORT || 4000;

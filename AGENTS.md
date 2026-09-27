@@ -27,6 +27,19 @@ Key design answers already decided:
   page→chapter mapping via an editable TOC.
 - Real git is only used (future) for exercise code; reading progress is a
   DB-backed "commit" model (like GitHub's metadata layer, not git itself).
+- **Identity is resolved server-side and inlined into the shell**, not fetched by
+  the client. The `bt_session` cookie is httpOnly, so nothing on the client can
+  know the session before its first render. SSR (`renderToPipeableStream`) and
+  React Router framework mode were both considered and rejected for this: the
+  home page is client-owned *by design* (the library comes from IndexedDB, the
+  book from a local file handle — see "No PDF upload" above), so a server render
+  would emit a correct auth header wrapped around a skeleton, in exchange for
+  two builds, a dev-pipeline restructure, and making `App.jsx` render-safe
+  (`Date.now()`, `toLocaleDateString` and `hasFileSystemAccess()` all diverge,
+  and one hydration mismatch discards the server markup outright). Revisit only
+  if server-owned *public* content grows to justify it — a JSON data block is
+  the same artifact a real SSR/framework layer would consume, so this is a
+  stepping stone, not a fork in the road.
 
 ## Repo layout
 
@@ -48,6 +61,7 @@ book-tracker/
         ├── TocTable.jsx      # spreadsheet-style editable chapter grid (title/start + Pages span)
         ├── ChapterProgress.jsx # per-chapter progress bars (done/active/not started) in the Activity drawer
         ├── storage.js        # IndexedDB handles/queue/sessions/thumbnails + localStorage helpers
+        ├── boot.js           # reads the server-inlined `bt-session` JSON block (identity before first paint)
         └── api.js            # fetch wrappers for the server
 ```
 
@@ -73,7 +87,10 @@ Client (IndexedDB `book-tracker`) — every book's local state is keyed by its *
 - `thumbnails` — page-1 cover previews (key = slug, value `{bookId: slug, dataUrl}`), shown on home library items
 LocalStorage: `book-tracker:meta` (slug → {title, fingerprint, fileKey, serverId, slug, pending}),
 `book-tracker:device` (deviceId UUID). Identity is NOT stored locally — it comes
-from the server's `bt_session` cookie via `GET /api/auth/me`.
+from the server's `bt_session` cookie, which is httpOnly and therefore
+unreadable by JS. So the **server inlines the resolved session into the app
+shell** (see "Server-inlined session bootstrap" below) and `client/src/boot.js`
+reads it at module load, before React's first render.
 
 On boot `storage.migrateLegacyBookKeys()` re-keys any leftover UUID-keyed
 handles/thumbnails/meta to their `meta.slug` (one-time upgrade from before
@@ -216,7 +233,7 @@ From the flat model to the hierarchy + roles, as one transaction on startup:
 - `GET /api/books/:id/commits` — your own commits only
 - `GET /api/auth/github` — redirect to GitHub authorize (client_id, scope `read:user`, random `state`)
 - `GET /api/auth/github/callback` — exchange code → upsert `users` by `github_id` → set httpOnly `bt_session` cookie → redirect
-- `GET /api/auth/me` → `{user: {id, display_name, username, avatar_url, is_admin, created_at} | null}` — `is_admin = role !== 'member'`; the raw role is never exposed here (or publicly)
+- `GET /api/auth/me` → `{user: {id, display_name, username, avatar_url, is_admin, created_at} | null}` — `is_admin = role !== 'member'`; the raw role is never exposed here (or publicly). Shape comes from `publicUser()`, which also feeds the inlined session block. `Cache-Control: no-store` + `Vary: Cookie` (per-user). Normally the client never calls this at all: the server already inlined the session into the shell (see gotchas), so it is only the dev/fallback path.
 - `GET /api/admin/role` — admin-only; `{role: 'super_admin' | 'admin'}` so the admin console can branch super-only features
 - `GET /api/admin/users` — super-admin-only; all users with their role
 - `PATCH /api/admin/users/:id/role` `{role: 'admin' | 'member'}` — super-admin-only; refuses to touch the `super_admin` row
@@ -357,6 +374,40 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
 - Relocating a missing file that is a *different edition* (new fingerprint)
   joins the matching edition of the same work (v5 edition binding; no new
   record for a mere re-scan of the same work).
+- **The app shell is per-user — never let it be cached, and never serve it
+  raw.** `server/index.js`'s `sendShell` resolves the `bt_session` cookie and
+  inlines `{"user":…}` as `<script type="application/json" id="bt-session">`
+  into `client/dist/index.html`; `client/src/boot.js` parses it at module load
+  so `App` can initialise `user` before the first paint. Consequences, all
+  load-bearing:
+  - `Cache-Control: no-store` + `Vary: Cookie` on the shell. Without them,
+    `res.send`'s default ETag is derived from the on-disk file — *identical for
+    every user* — so a 304 could replay one reader's session HTML back to
+    another after a sign-out/sign-in in the same browser. Assets
+    (`express.static`) stay cacheable: they're content-hashed and
+    user-independent.
+  - `/` and `/index.html` are routed to `sendShell` **before**
+    `express.static({index:false})`. If you drop that ordering the raw file is
+    served and the session silently goes missing.
+  - The block is a `type="application/json"` **data block**, not an executable
+    script, so `script-src 'self'` does not apply and it needs **no CSP
+    nonce** — don't "fix" it with `'unsafe-inline'`. `<` is escaped to `\u003c`
+    so a display name can't close the element early; it round-trips losslessly
+    through `JSON.parse`.
+  - `publicUser()` in `server/index.js` is the single public user shape, shared
+    by `/api/auth/me`, `/api/users/:username` and the block, so they can't
+    drift. The raw `role` is exposed **nowhere** public — only via
+    `/api/admin/role` (admin-only) and server-side permission checks.
+  - The **error middleware must stay last** in the file. Express only reaches a
+    4-arg handler registered *after* the failing route, so `h()`'s rejections
+    from `sendShell` (e.g. `dist/` missing) would otherwise bypass the JSON
+    error contract.
+  - **Dev has no bootstrap**: the Vite dev server on :5173 serves `index.html`
+    itself, so there is no block and `App` falls back to `api.me()` behind an
+    `authPending` gate (a skeleton, not the signed-out hero). Production is
+    structurally immune to the flash because `authReady` is true on the first
+    render. When testing auth flashes, test the *production* server
+    (`npm run build && npm run dev:server`, :4000), not :5173.
 - **Auth sessions are DB-backed** (v6): `sessions` rows in `data/reader.db`, so
   server restarts no longer sign anyone out — sessions persist in SQLite. Each
   request is one indexed session read (token → user id) plus the live-user
@@ -452,10 +503,10 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
   navigating away from a book route calls `close()`. Profile uses the GitHub
   `username` (stored in a new `users.username` column, migration v2, populated
   from `me.login` in the OAuth callback; `/api/auth/me` now returns it). A
-  production SPA fallback in `server/index.js` serves `client/dist/index.html`
-  for any non-`/api` GET route so browser refresh works on nested routes
-  (dev refresh still flows through the Vite proxy; the fallback only matters
-  when serving via the Express server).
+  production SPA fallback in `server/index.js` serves the app shell (via
+  `sendShell`, which also inlines the session) for any non-`/api` GET route so
+  browser refresh works on nested routes (dev refresh still flows through the
+  Vite proxy; the fallback only matters when serving via the Express server).
 - **Book slugs (migration v3)**: `books.slug` UNIQUE (plain column + named
   unique index, since SQLite can't `ADD COLUMN` a UNIQUE constraint). Slug
   generation lives server-side (`db.slugify`/`db.uniqueSlug`): lowercase,
@@ -545,6 +596,15 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
   account deletion), pending-review badge on library items / book info /
   wizard and in saved meta, admin nav link, and `api.js` now throws errors with
   their HTTP status.
+- **No signed-out flash on first load** (issue #1): the shell inlines the
+  resolved session as a `<script type="application/json" id="bt-session">` data
+  block, read by `client/src/boot.js` at module load, so `App` initialises
+  `user` before the first paint and never issues `GET /api/auth/me` in
+  production (dev keeps an `api.me()` fallback behind an `authPending`
+  skeleton, since Vite serves `index.html` itself). `publicUser()` is now the
+  single public user shape, and `/api/auth/me` no longer returns the raw
+  `role` — it did, against the contract documented above; the role is still
+  reachable by the admin console via the admin-only `/api/admin/role`.
 
 ## Not built yet (next steps)
 
