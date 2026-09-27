@@ -596,6 +596,18 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
   account deletion), pending-review badge on library items / book info /
   wizard and in saved meta, admin nav link, and `api.js` now throws errors with
   their HTTP status.
+- **Admin console loads per section** (issue #2): `/admin` used to mount nothing
+  until one `Promise.all` resolved, so Catalog review and Retired catalog
+  appeared all at once and pushed the rest of the page down. Every section now
+  mounts on first paint and fetches in parallel as independent effects, driven
+  by a per-section `loading` flag; splitting the requests also means one slow or
+  failing section no longer discards the others' results. The placeholder is a
+  row-shaped `SkeletonList` (`Skeleton.jsx`) sized to mirror `.admin-row`, so
+  nothing shifts when the data lands. The Account danger zone waits on the role
+  too, so a super admin never sees the ordinary-admin delete button for a frame
+  before it swaps to the ownership controls. A `loaded` map records the rows
+  already on screen, so a refresh after Bind/Reactivate keeps the existing rows
+  instead of re-skeletonising.
 - **No signed-out flash on first load** (issue #1): the shell inlines the
   resolved session as a `<script type="application/json" id="bt-session">` data
   block, read by `client/src/boot.js` at module load, so `App` initialises
