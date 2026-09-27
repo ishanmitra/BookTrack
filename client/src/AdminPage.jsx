@@ -71,7 +71,10 @@ export default function AdminPage({ onAccountDeleted }) {
     return () => { alive = false; };
   }, [refreshKey]);
 
-  // Super-admin only, so it can't join the batch above — it waits on the role.
+  // Super-admin only, so unlike the catalog sections it can't join the batch
+  // above — GET /api/admin/users is 403 for everyone else, and firing it
+  // speculatively would mean a guaranteed failing request on every load for
+  // ordinary admins. Gating on the role costs the super admin one round-trip.
   useEffect(() => {
     if (role !== "super_admin") return;
     let alive = true;
@@ -88,6 +91,12 @@ export default function AdminPage({ onAccountDeleted }) {
   }, [role, refreshKey]);
 
   const isSuper = role === "super_admin";
+  // The Roles panel is on screen from first paint, so hold its rows until the
+  // role is known and (for a super admin) the user list has landed. `loaded`
+  // rather than `usersLoading`, because the role resolves a round-trip before
+  // the user request is even dispatched — keying off the loading flag would
+  // render one empty frame in between.
+  const usersSkeleton = roleLoading || (isSuper && !loaded.users);
 
   const act = async (fn, okMsg) => {
     try {
@@ -168,43 +177,43 @@ export default function AdminPage({ onAccountDeleted }) {
         )}
       </section>
 
-      {isSuper && (
-        <section className="panel settings-section users-section" aria-busy={usersLoading || undefined}>
-          <h2>Roles</h2>
-          {skeleton("users", usersLoading) ? (
-            <SkeletonList rows={3} avatar />
-          ) : (
-            <ul className="admin-list">
-              {users.map((u) => (
-                <li key={u.id} className="admin-row admin-user-row">
-                  <div className="admin-row-main admin-user-main">
-                    {u.avatar_url && <img className="user-avatar admin-user-avatar" src={u.avatar_url} alt="" />}
-                    <div className="admin-user-id">
-                      <strong>{u.display_name || u.username}</strong>
-                      <span className="muted">@{u.username}</span>
-                    </div>
+      <section className="panel settings-section users-section" aria-busy={roleLoading || usersLoading || undefined}>
+        <h2>Roles</h2>
+        {usersSkeleton ? (
+          <SkeletonList rows={3} avatar />
+        ) : isSuper ? (
+          <ul className="admin-list">
+            {users.map((u) => (
+              <li key={u.id} className="admin-row admin-user-row">
+                <div className="admin-row-main admin-user-main">
+                  {u.avatar_url && <img className="user-avatar admin-user-avatar" src={u.avatar_url} alt="" />}
+                  <div className="admin-user-id">
+                    <strong>{u.display_name || u.username}</strong>
+                    <span className="muted">@{u.username}</span>
                   </div>
-                  <div className="admin-row-actions">
-                    <span className={`role-chip ${u.role === "super_admin" ? "role-admin" : `role-${u.role}`}`}>
-                      {u.role === "super_admin" ? "admin" : u.role}
-                    </span>
-                    {u.role !== "super_admin" && (
-                      <select
-                        value={u.role}
-                        onChange={(e) => changeRole(u, e.target.value)}
-                        aria-label={`Role for ${u.username}`}
-                      >
-                        <option value="member">member</option>
-                        <option value="admin">admin</option>
-                      </select>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      )}
+                </div>
+                <div className="admin-row-actions">
+                  <span className={`role-chip ${u.role === "super_admin" ? "role-admin" : `role-${u.role}`}`}>
+                    {u.role === "super_admin" ? "admin" : u.role}
+                  </span>
+                  {u.role !== "super_admin" && (
+                    <select
+                      value={u.role}
+                      onChange={(e) => changeRole(u, e.target.value)}
+                      aria-label={`Role for ${u.username}`}
+                    >
+                      <option value="member">member</option>
+                      <option value="admin">admin</option>
+                    </select>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="hint">Role management is restricted to the account owner.</p>
+        )}
+      </section>
 
       <section className="panel settings-section danger-zone" aria-busy={roleLoading || undefined}>
         <h2>Account</h2>

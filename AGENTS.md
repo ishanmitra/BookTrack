@@ -608,6 +608,17 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
   before it swaps to the ownership controls. A `loaded` map records the rows
   already on screen, so a refresh after Bind/Reactivate keeps the existing rows
   instead of re-skeletonising.
+- **Roles panel renders from first paint too** (issue #2): it was gated on
+  `isSuper`, so it materialised a round-trip after mount and pushed the Account
+  zone down. It now renders immediately alongside the catalog sections and holds
+  row-shaped placeholders until the role is known and the user list has landed;
+  an ordinary admin sees a one-line note instead, so the footprint is the same
+  for everyone and no half-rendered table is ever shown. The user list still
+  can't join the parallel batch: `GET /api/admin/users` is super-admin-only, so
+  requesting it speculatively would fire a guaranteed 403 on every load for
+  ordinary admins. The placeholder is keyed off `loaded` rather than the loading
+  flag, because the role resolves a round-trip before that request is
+  dispatched — the flag would otherwise render one empty frame in between.
 - **No signed-out flash on first load** (issue #1): the shell inlines the
   resolved session as a `<script type="application/json" id="bt-session">` data
   block, read by `client/src/boot.js` at module load, so `App` initialises
