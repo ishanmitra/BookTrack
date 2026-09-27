@@ -858,6 +858,12 @@ span.admin-tag {
   .skeleton { animation: none; }
 }
 
+/* GrowBox.jsx animates its own height when its content is swapped. Clipping only
+   while the transition runs keeps a shrinking box from spilling its content and
+   stops a growing one from revealing content ahead of the box; at rest the class
+   is gone so the wrapper is a plain block. */
+.grow-box-animating { overflow: clip; }
+
 /* Row-shaped placeholders (Skeleton.jsx) for lists that stream in after first
    paint. Sized to mirror .admin-row so a section keeps its height when the
    real rows replace the skeleton. */

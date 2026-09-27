@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import api from "./api";
 import { Skeleton, SkeletonList } from "./Skeleton";
+import { GrowBox } from "./GrowBox";
 
 function fmtTime(iso) {
   if (!iso) return "";
@@ -134,6 +135,7 @@ export default function AdminPage({ onAccountDeleted }) {
 
       <section className="panel settings-section catalog-review" aria-busy={pendingLoading || undefined}>
         <h2>Catalog review <span className="muted">(pending uploads)</span></h2>
+        <GrowBox>
         {skeleton("pending", pendingLoading) ? (
           <SkeletonList rows={3} />
         ) : pending.length === 0 ? (
@@ -154,10 +156,12 @@ export default function AdminPage({ onAccountDeleted }) {
             ))}
           </ul>
         )}
+        </GrowBox>
       </section>
 
       <section className="panel settings-section retired-section" aria-busy={retiredLoading || undefined}>
         <h2>Retired Catalog <span className="muted">(hidden, histories kept)</span></h2>
+        <GrowBox>
         {skeleton("retired", retiredLoading) ? (
           <SkeletonList rows={2} />
         ) : retired.length === 0 ? (
@@ -175,10 +179,12 @@ export default function AdminPage({ onAccountDeleted }) {
             ))}
           </ul>
         )}
+        </GrowBox>
       </section>
 
       <section className="panel settings-section users-section" aria-busy={roleLoading || usersLoading || undefined}>
         <h2>Roles</h2>
+        <GrowBox>
         {usersSkeleton ? (
           <SkeletonList rows={3} avatar />
         ) : isSuper ? (
@@ -213,10 +219,12 @@ export default function AdminPage({ onAccountDeleted }) {
         ) : (
           <p className="hint">Role management is restricted to the account owner.</p>
         )}
+        </GrowBox>
       </section>
 
       <section className="panel settings-section danger-zone" aria-busy={roleLoading || undefined}>
         <h2>Account</h2>
+        <GrowBox>
         {roleLoading ? (
           <div className="danger-row">
             <Skeleton className="skeleton-line-grow" />
@@ -242,6 +250,7 @@ export default function AdminPage({ onAccountDeleted }) {
             <button className="danger" onClick={deleteAccount}>Delete my account</button>
           </div>
         )}
+        </GrowBox>
       </section>
 
       {showTransfer && (

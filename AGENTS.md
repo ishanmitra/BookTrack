@@ -60,6 +60,7 @@ book-tracker/
         ├── PageHeatmap.jsx   # per-page grid (boxes = pages) with shade = time on page; collapse→25-page chunks; ±100 range zoom
         ├── TocTable.jsx      # spreadsheet-style editable chapter grid (title/start + Pages span)
         ├── ChapterProgress.jsx # per-chapter progress bars (done/active/not started) in the Activity drawer
+        ├── GrowBox.jsx     # wrapper that animates its own height when content is swapped (skeleton → data)
         ├── storage.js        # IndexedDB handles/queue/sessions/thumbnails + localStorage helpers
         ├── boot.js           # reads the server-inlined `bt-session` JSON block (identity before first paint)
         └── api.js            # fetch wrappers for the server
@@ -369,6 +370,39 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
 - **Global key handling in PdfReader** must ignore events from interactive
   elements (`INPUT`/`TEXTAREA`/`SELECT`/`BUTTON`/contenteditable), otherwise
   space/arrows "steal" keystrokes from the metadata/TOC form fields.
+- **Skeleton→data height changes are animated by `GrowBox.jsx`, not CSS.**
+  Wrapping a placeholder in `<GrowBox>` eases the wrapper's height when the
+  content inside it is swapped for fetched rows (admin console sections, the
+  home welcome slot, the Activity drawer's heatmap). CSS genuinely cannot do
+  this: `interpolate-size: allow-keywords` only interpolates between a
+  `<length-percentage>` and an intrinsic keyword and **never auto → auto**
+  (MDN is explicit), which is exactly what a content swap is — the
+  `grid-template-rows: 0fr` trick only works because it pins a *length* on the
+  closed end. So `GrowBox` measures the natural height and drives an explicit
+  height for the transition's duration. Four load-bearing details:
+  - the **start value must come from the previous run's measurement, held in a
+    ref** — never from the element. By the time a layout effect runs, React has
+    already committed the new children, so re-reading the rect gives the *new*
+    height, `from === to`, and the swap snaps. (Verified in headless Chromium:
+    25 sampled frames, all at the final height, vs. 18 distinct heights easing
+    in once the ref carries the value across renders.) The one exception is
+    interrupting a transition that is still running, where the current on-screen
+    height *is* the right start value.
+  - it must be a **`useLayoutEffect`**: reading the rect, dropping the inline
+    height, re-measuring, and writing the start value all force sync layout, so
+    running it in `useEffect` would paint the intermediate states and flash.
+  - the start value is read **before** `transition` is touched — editing the
+    transition cancels a running one, so a re-render mid-animation would
+    otherwise report the old animation's *end* height and jump.
+  - `.grow-box-animating { overflow: clip }` is added only for the duration, so
+    a shrinking box can't spill its content and a growing one can't reveal
+    content ahead of the box; the class is removed on `transitionend` (with a
+    `setTimeout` fallback, since a skipped transition never fires it).
+    `prefers-reduced-motion` skips the animation entirely. Don't make it
+    permanent — it would clip anything overflowing the wrapper.
+  Used together with the footprint-matching skeletons (`.skeleton-row` mirrors
+  `.admin-row`), which is what keeps the *reserve* right; `GrowBox` only smooths
+  the residual delta.
 - HMR/dev: do not run two servers on :4000 (EADDRINUSE); kill stray
   `node index.js`/`vite` processes.
 - Relocating a missing file that is a *different edition* (new fingerprint)
