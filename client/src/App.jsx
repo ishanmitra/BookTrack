@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useLocation, Navigate, Link } from "react-router-dom";
 import api from "./api";
+import { boot } from "./boot";
 import { STATUS, useLocalBook } from "./useLocalBook";
 import * as storage from "./storage";
 import PdfReader from "./PdfReader";
@@ -168,7 +169,8 @@ export default function App() {
   const [pausedSession, setPausedSession] = useState(null);
   const [thumbs, setThumbs] = useState({});
   const [thumbData, setThumbData] = useState(null);
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => boot.user);
+  const [authReady, setAuthReady] = useState(boot.resolved);
   const [stats, setStats] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileDay, setProfileDay] = useState(null);
@@ -213,9 +215,25 @@ export default function App() {
   }, [readKey, close]);
 
   // ── boot ──────────────────────────────────────────────────────────
+  // The shell normally inlines the resolved session, so `user` is already
+  // correct on the first render and there is nothing to fetch — that is what
+  // stops the signed-out hero flashing at a signed-in reader. The fetch below
+  // is only the fallback for when the block is missing (the Vite dev server
+  // serves index.html itself) or unparseable.
   useEffect(() => {
-    api.me().then((r) => setUser(r.user)).catch(() => {});
+    if (boot.resolved) return;
+    let alive = true;
+    api.me()
+      .then((r) => { if (alive) setUser(r.user); })
+      .catch(() => {})
+      .finally(() => { if (alive) setAuthReady(true); });
+    return () => { alive = false; };
   }, []);
+
+  // Signed-out-specific UI must wait for this: while the session is unknown,
+  // rendering the hero / "Sign in" would show a signed-out reader the wrong
+  // page for the length of the request.
+  const authPending = !authReady;
 
   useEffect(() => {
     if (!user) { setStats(null); return; }
@@ -627,6 +645,8 @@ export default function App() {
                     </div>
                   )}
                 </div>
+              ) : authPending ? (
+                <span className="account-skeleton" aria-hidden="true" />
               ) : (
                 <a className="ghost" href="/api/auth/github">Sign in</a>
               )}
@@ -721,7 +741,11 @@ export default function App() {
         )
       ) : isAdminPage ? (
         /* ── Admin console (/admin) — admins & super admins only ────── */
-        user?.is_admin ? (
+        authPending ? (
+          <section className="profile">
+            <div className="profile-main"><p className="hint">Checking access…</p></div>
+          </section>
+        ) : user?.is_admin ? (
           <AdminPage onAccountDeleted={handleAccountDeleted} />
         ) : (
           <section className="profile">
@@ -747,6 +771,8 @@ export default function App() {
                 </div>
               </div>
             </div>
+          ) : authPending ? (
+            <div className="home-welcome home-welcome-skeleton" aria-hidden="true" />
           ) : (
             <div className="home-welcome home-welcome-hero">
               <div className="home-welcome-name">
@@ -808,7 +834,7 @@ export default function App() {
             <p className="hint">Your browser lacks the File System Access API — use Chrome/Edge/Safari.</p>
           )}
           {saved.length === 0 && (
-            <p className="hint">{user ? "No books attached yet. Pick a local PDF — the file never leaves your device." : "No books attached yet."}</p>
+            <p className="hint">{authPending ? "Loading library…" : user ? "No books attached yet. Pick a local PDF — the file never leaves your device." : "No books attached yet."}</p>
           )}
           <ul className="book-list library-list">
             {orderedSaved.map((s) => (
@@ -923,7 +949,7 @@ export default function App() {
                   <button onClick={closePanel}>✕</button>
                 </div>
                 <div className="drawer-body">
-                  {!user && (
+                  {!user && !authPending && (
                     <div className="activity-nudge">
                       <p>Sign in with your GitHub account to start tracking reading sessions and commit progress.</p>
                       <a className="primary" href="/api/auth/github">Sign in with GitHub</a>
