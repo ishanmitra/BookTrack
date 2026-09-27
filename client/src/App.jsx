@@ -13,6 +13,7 @@ import BookWizard from "./BookWizard";
 import BookInfo from "./BookInfo";
 import AdminPage from "./AdminPage";
 import BookFilter from "./BookFilter";
+import { GrowBox } from "./GrowBox";
 
 const STATUS_LABEL = {
   [STATUS.READY]: "✔ connected",
@@ -761,6 +762,7 @@ export default function App() {
       ) : showLibrary ? (
         /* ── Library / home ────────────────────────────────────────── */
         <section className="library">
+          <GrowBox>
           {user ? (
             <div className="home-welcome">
               {user.avatar_url && <img className="home-welcome-avatar" src={user.avatar_url} alt="" />}
@@ -782,6 +784,7 @@ export default function App() {
               <a className="primary hero-signin" href="/api/auth/github">Sign in with GitHub to start tracking</a>
             </div>
           )}
+          </GrowBox>
 
           {resumeSession && (
             <div className="continue-card">
@@ -961,6 +964,7 @@ export default function App() {
                     <div className="meta-line"><span>Edition</span><b>{meta?.edition ?? "—"}</b></div>
                     <div className="meta-line"><span>Fingerprint</span><b className="fprint">{active.book?.fingerprint?.slice(0, 16) || "—"}…</b></div>
                   </div>
+                  <GrowBox>
                   {commitsLoading ? (
                     <p className="muted">Loading…</p>
                   ) : (
@@ -968,6 +972,7 @@ export default function App() {
                       <Heatmap commits={commits} onSelectDay={setSelectedDay} selectedDay={selectedDay} />
                     </div>
                   )}
+                  </GrowBox>
                   <div className="activity-block">
                     <PageHeatmap pageCount={pageCount ?? active.book?.page_count ?? null} commits={visibleCommits} />
                   </div>
