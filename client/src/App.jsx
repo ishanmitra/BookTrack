@@ -193,7 +193,10 @@ export default function App() {
 
   const infoKey = location.pathname.match(/^\/book\/([^/]+)/)?.[1] || null;
   const readKey = location.pathname.match(/^\/read\/([^/]+)/)?.[1] || null;
-  const isAdminPage = location.pathname.startsWith("/admin");
+  // Exact `/admin` or a sub-path — a bare `startsWith` would also claim
+  // `/administer` and friends, which are not the admin console.
+  const isAdminPage =
+    location.pathname === "/admin" || location.pathname.startsWith("/admin/");
   const showLibrary = !isProfile && !infoKey && !readKey && !isAdminPage;
   const bookOpen = !!readKey && active.file != null;
   const readerOpen = active.status === STATUS.READY && active.file != null;
@@ -612,7 +615,14 @@ export default function App() {
     return books;
   }, [stats]);
 
-  const showNavbar = showLibrary || isProfile || (infoKey && !readKey) || isAdminPage;
+  // `/admin` renders its own navbar branch, but the page is about to be
+  // redirected away unless the session is an admin one. `Navigate` navigates in
+  // an effect, so without this the library would commit one frame still wearing
+  // the admin navbar's "Library" link. `authPending` counts as allowed so a dev
+  // hard-refresh (no inlined session, role not resolved yet) doesn't blink the
+  // navbar out and back.
+  const adminAllowed = authPending || !!user?.is_admin;
+  const showNavbar = showLibrary || isProfile || (infoKey && !readKey) || (isAdminPage && adminAllowed);
 
   // ── render ────────────────────────────────────────────────────────
   return (
@@ -742,6 +752,15 @@ export default function App() {
         )
       ) : isAdminPage ? (
         /* ── Admin console (/admin) — admins & super admins only ────── */
+        /* Route gate: anyone else is redirected, not shown a refusal page.
+           This is UX, not security — the admin API is what actually refuses
+           (requireAdmin / requireSuperAdmin, server/index.js).
+
+           `authPending` has to stay in front of the test: with no inlined
+           session block (the Vite dev server serves index.html itself) `user` is
+           null until /api/auth/me lands, so a bare `!user?.is_admin` would boot
+           a real admin out of their own console on a dev hard-refresh. Same
+           reason the signed-out hero waits on it. */
         authPending ? (
           <section className="profile">
             <div className="profile-main"><p className="hint">Checking access…</p></div>
@@ -749,15 +768,7 @@ export default function App() {
         ) : user?.is_admin ? (
           <AdminPage onAccountDeleted={handleAccountDeleted} />
         ) : (
-          <section className="profile">
-            <div className="profile-full">
-              <div className="profile-missing">
-                <h2>Admins only</h2>
-                <p className="muted">You need to be signed in as an admin to manage the catalog.</p>
-                <Link className="primary" to="/">Back to Library</Link>
-              </div>
-            </div>
-          </section>
+          <Navigate to="/" replace />
         )
       ) : showLibrary ? (
         /* ── Library / home ────────────────────────────────────────── */
