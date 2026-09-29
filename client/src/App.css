@@ -1291,6 +1291,10 @@ a.session-log-book:hover { color: var(--accent); text-decoration: underline; }
 .admin-user-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .admin-row-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
 
+/* No align-self here: the chip sits in .admin-row-actions, a row flex container
+   that already centres its children. `flex-start` overrode that and pinned the
+   badge to the top — invisible while the super-admin row had no button beside
+   it, obvious once the Revoke button made the actions box taller than the chip. */
 .role-chip {
   font-size: 10px;
   line-height: 1;
@@ -1299,7 +1303,6 @@ a.session-log-book:hover { color: var(--accent); text-decoration: underline; }
   border-radius: 8px;
   padding: 2px 6px;
   font-weight: 600;
-  align-self: flex-start;
 }
 .role-admin { background: var(--purple); color: #fff; }
 
