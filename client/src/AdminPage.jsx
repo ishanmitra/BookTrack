@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import api from "./api";
 import { Skeleton, SkeletonList } from "./Skeleton";
 import { GrowBox } from "./GrowBox";
+import PromoteMember from "./PromoteMember";
 
 function fmtTime(iso) {
   if (!iso) return "";
@@ -9,7 +10,10 @@ function fmtTime(iso) {
   return d.toLocaleString();
 }
 
-function sortUsers(list) {
+// The admins list is fetched as the privileged set only. Plain members are
+// reached through PromoteMember's search instead of sitting in this list, so the
+// panel stays short no matter how many accounts exist.
+function sortAdmins(list) {
   return [...list].sort((a, b) => {
     if (a.role === "super_admin") return -1;
     if (b.role === "super_admin") return 1;
@@ -20,7 +24,7 @@ function sortUsers(list) {
 export default function AdminPage({ onAccountDeleted }) {
   const [pending, setPending] = useState([]);
   const [retired, setRetired] = useState([]);
-  const [users, setUsers] = useState([]);
+  const [admins, setAdmins] = useState([]);
   const [notice, setNotice] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [role, setRole] = useState(null);
@@ -80,8 +84,9 @@ export default function AdminPage({ onAccountDeleted }) {
     if (role !== "super_admin") return;
     let alive = true;
     setUsersLoading(true);
-    api.adminUsers()
-      .then((u) => { if (alive) setUsers(sortUsers(u)); })
+    api
+      .adminUsers({ role: "privileged" })
+      .then((u) => { if (alive) setAdmins(sortAdmins(u)); })
       .catch((e) => { if (alive) setNotice(e.message); })
       .then(() => {
         if (!alive) return;
@@ -117,6 +122,10 @@ export default function AdminPage({ onAccountDeleted }) {
 
   const changeRole = (u, role) =>
     act(() => api.setUserRole(u.id, role), `${u.username} is now ${role}.`);
+
+  // Stable identity: PromoteMember keeps its debounced search effect keyed on
+  // this, so a fresh arrow every render would restart the timer on every render.
+  const showError = useCallback((e) => setNotice(e.message), []);
 
   const deleteAccount = () => {
     if (!window.confirm("Delete your account and reading history permanently? This cannot be undone.")) return;
@@ -186,36 +195,39 @@ export default function AdminPage({ onAccountDeleted }) {
         <h2>Roles</h2>
         <GrowBox>
         {usersSkeleton ? (
-          <SkeletonList rows={3} avatar />
+          <>
+            <Skeleton className="skeleton-control" />
+            <SkeletonList rows={3} avatar />
+          </>
         ) : isSuper ? (
-          <ul className="admin-list">
-            {users.map((u) => (
-              <li key={u.id} className="admin-row admin-user-row">
-                <div className="admin-row-main admin-user-main">
-                  {u.avatar_url && <img className="user-avatar admin-user-avatar" src={u.avatar_url} alt="" />}
-                  <div className="admin-user-id">
-                    <strong>{u.display_name || u.username}</strong>
-                    <span className="muted">@{u.username}</span>
-                  </div>
-                </div>
-                <div className="admin-row-actions">
-                  <span className={`role-chip ${u.role === "super_admin" ? "role-admin" : `role-${u.role}`}`}>
-                    {u.role === "super_admin" ? "admin" : u.role}
-                  </span>
-                  {u.role !== "super_admin" && (
-                    <select
-                      value={u.role}
-                      onChange={(e) => changeRole(u, e.target.value)}
-                      aria-label={`Role for ${u.username}`}
-                    >
-                      <option value="member">member</option>
-                      <option value="admin">admin</option>
-                    </select>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
+          <>
+            <PromoteMember onPromote={(m) => changeRole(m, "admin")} onError={showError} />
+            {admins.length === 0 ? (
+              <p className="hint">No admins yet.</p>
+            ) : (
+              <ul className="admin-list">
+                {admins.map((u) => (
+                  <li key={u.id} className="admin-row admin-user-row">
+                    <div className="admin-row-main admin-user-main">
+                      {u.avatar_url && <img className="user-avatar admin-user-avatar" src={u.avatar_url} alt="" />}
+                      <div className="admin-user-id">
+                        <strong>{u.display_name || u.username}</strong>
+                        <span className="muted">@{u.username}</span>
+                      </div>
+                    </div>
+                    <div className="admin-row-actions">
+                      <span className="role-chip role-admin">admin</span>
+                      {u.role !== "super_admin" && (
+                        <button onClick={() => changeRole(u, "member")} aria-label={`Revoke admin from ${u.username}`}>
+                          Revoke
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
         ) : (
           <p className="hint">Role management is restricted to the account owner.</p>
         )}
