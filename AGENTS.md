@@ -532,7 +532,8 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
   Routes: `/` library, `/user/:username` profile (**public** — works signed in
   or out; missing usernames render a "doesn't exist yet" message, no redirect),
   `/book/:slug` book info page (see below), `/read/:slug`
-  reader. Landing on `/read/:slug` triggers
+  reader, `/admin` console (**route-gated** — redirect to `/` for
+  non-admins, see issue #5 below). Landing on `/read/:slug` triggers
   auto-reconnect (with a `reconnectTriggeredRef` guard to avoid double calls);
   navigating away from a book route calls `close()`. Profile uses the GitHub
   `username` (stored in a new `users.username` column, migration v2, populated
@@ -662,6 +663,31 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
   single public user shape, and `/api/auth/me` no longer returns the raw
   `role` — it did, against the contract documented above; the role is still
   reachable by the admin console via the admin-only `/api/admin/role`.
+- **`/admin` is route-gated** (issue #5): `App.jsx` has no `<Routes>` — route
+  identity is derived by regex from `location.pathname` and rendered as a chain
+  of ternaries, so "not allowed here" used to be a *rendered page*, not a
+  refusal: any visitor could load `/admin` and got a live "Admins only" panel.
+  The non-admin branch is now `<Navigate to="/" replace />`, so the route is
+  simply refused. `replace` matters — without it Back would walk straight back
+  into the redirect. This is a **UX gate, not a security boundary**: nothing
+  sensitive is served at `/admin` (the shell is identical for everyone) and
+  every admin endpoint was already behind `requireAdmin`/`requireSuperAdmin`.
+  Three details are load-bearing:
+  - the `authPending` skeleton must stay *in front of* the role test. With no
+    inlined session block (Vite dev serves `index.html` itself) `user` is null
+    until `/api/auth/me` lands, so a bare `!user?.is_admin` would boot a real
+    admin out of their own console on a dev hard-refresh. Same reason the
+    signed-out hero waits on it.
+  - `showNavbar` is gated on `adminAllowed` as well. `Navigate` navigates in an
+    effect, so without it the library commits one frame still wearing the admin
+    navbar's "Library" link. `adminAllowed` counts `authPending` as allowed so
+    that frame doesn't blink the navbar out and back.
+  - `isAdminPage` matches `/admin` or `/admin/…`, not a bare
+    `startsWith("/admin")` — the latter also claimed `/administer`, which then
+    resolved to the library instead of the console.
+  Not done on purpose: gating in `sendShell` (302 non-admins off `/admin`). It
+  duplicates the role check, needs `freshUser` before the shell read, and buys
+  nothing the client gate doesn't.
 
 ## Not built yet (next steps)
 
