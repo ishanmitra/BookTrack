@@ -98,6 +98,23 @@ export default function AdminPage({ onAccountDeleted }) {
     return () => { alive = false; };
   }, [role, refreshKey]);
 
+  // A pending flag only means something while its row is on screen, so drop
+  // entries for users the roster no longer lists. A successful revoke leaves
+  // its row behind; without this the id outlives the row, and re-promoting the
+  // same person later returns a row stuck on `Revoking…` until a page reload.
+  // Keyed on `admins` rather than the fetch above so it holds for any path that
+  // changes the roster, not just this one. Safe mid-revoke: the server still
+  // lists the user as an admin until their PATCH lands, so a refetch dispatched
+  // in that window cannot prune a legitimately in-flight revoke.
+  useEffect(() => {
+    setRevoking((prev) => {
+      if (prev.size === 0) return prev;
+      const present = new Set(admins.map((a) => a.id));
+      const next = new Set([...prev].filter((id) => present.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [admins]);
+
   const isSuper = role === "super_admin";
   // The Roles panel is on screen from first paint, so hold its rows until the
   // role is known and (for a super admin) the user list has landed. `loaded`
@@ -106,12 +123,10 @@ export default function AdminPage({ onAccountDeleted }) {
   // render one empty frame in between.
   const usersSkeleton = roleLoading || (isSuper && !loaded.users);
 
-  // `onSettled` runs whether the action resolved or threw, so a caller that
-  // disables a control for the duration of its own request always re-enables it.
   // Resolves true/false rather than throwing, so a caller that must wait on the
-  // outcome (PromoteMember closing its search) can branch without an unhandled
-  // rejection here.
-  const act = async (fn, okMsg, onSettled) => {
+  // outcome (revoke and PromoteMember both branch on it) can do so without
+  // leaving an unhandled rejection behind.
+  const act = async (fn, okMsg) => {
     try {
       await fn();
       setNotice(okMsg);
@@ -120,8 +135,6 @@ export default function AdminPage({ onAccountDeleted }) {
     } catch (e) {
       setNotice(e.message);
       return false;
-    } finally {
-      if (onSettled) onSettled();
     }
   };
 
@@ -131,8 +144,8 @@ export default function AdminPage({ onAccountDeleted }) {
   const reactivate = (w) =>
     act(() => api.reactivateBook(w.id), `Reactivated "${w.title}".`);
 
-  const changeRole = (u, role, onSettled) =>
-    act(() => api.setUserRole(u.id, role), `${u.username} is now ${role}.`, onSettled);
+  const changeRole = (u, role) =>
+    act(() => api.setUserRole(u.id, role), `${u.username} is now ${role}.`);
 
   const markRevoking = (id, on) =>
     setRevoking((prev) => {
@@ -145,10 +158,17 @@ export default function AdminPage({ onAccountDeleted }) {
   // Held until the PATCH settles, so a second tap can't fire a duplicate revoke.
   // The server would answer it the same way, but the row would re-render twice
   // and the user gets no signal that the first tap registered.
-  const revoke = (u) => {
+  const revoke = async (u) => {
     if (revoking.has(u.id)) return;
     markRevoking(u.id, true);
-    changeRole(u, "member", () => markRevoking(u.id, false));
+    const ok = await changeRole(u, "member");
+    // Deliberately not cleared on success: the roster refetch that
+    // `setRefreshKey` triggers is a separate round-trip, so clearing here would
+    // render one frame with the button re-enabled while the revoked admin is
+    // still in the stale list — an active "Revoke" on an already-revoked row.
+    // The button leaves with the row instead, and the roster effect above prunes
+    // the leftover id once the row is gone. Only a failure brings it back.
+    if (!ok) markRevoking(u.id, false);
   };
 
   // Stable identity: PromoteMember keeps its debounced search effect keyed on

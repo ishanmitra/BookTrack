@@ -58,10 +58,12 @@ export default function PromoteMember({ onPromote, onError }) {
     };
   }, [trimmed, canSearch, onError]);
 
-  // The search stays open with the row held on Pending until the PATCH settles,
+  // The search stays open with the row held on Promoting until the PATCH settles,
   // so the user can see the action land rather than have the list vanish under
   // their cursor. A failure keeps the search open — the notice carries the error
-  // and the button comes back, so the promote can be retried.
+  // and the button comes back, so the promote can be retried. On success the
+  // clear below unmounts the list in the same render, so there is no frame where
+  // a re-enabled button is visible against a list that is about to disappear.
   const promote = async (m) => {
     if (pending.has(m.id)) return;
     markPending(m.id, true);
