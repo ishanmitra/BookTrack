@@ -15,6 +15,16 @@ export default function PromoteMember({ onPromote, onError }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
+  // Match ids with a promote in flight, so each row disables only itself.
+  const [pending, setPending] = useState(() => new Set());
+
+  const markPending = (id, on) =>
+    setPending((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
 
   const trimmed = query.trim();
   const canSearch = trimmed.length >= MIN_QUERY;
@@ -48,8 +58,16 @@ export default function PromoteMember({ onPromote, onError }) {
     };
   }, [trimmed, canSearch, onError]);
 
-  const promote = (m) => {
-    onPromote(m);
+  // The search stays open with the row held on Pending until the PATCH settles,
+  // so the user can see the action land rather than have the list vanish under
+  // their cursor. A failure keeps the search open — the notice carries the error
+  // and the button comes back, so the promote can be retried.
+  const promote = async (m) => {
+    if (pending.has(m.id)) return;
+    markPending(m.id, true);
+    const ok = await onPromote(m);
+    markPending(m.id, false);
+    if (!ok) return;
     setQuery("");
     setResults([]);
   };
@@ -84,18 +102,28 @@ export default function PromoteMember({ onPromote, onError }) {
         ) : (
           <>
             <ul className="admin-list promote-results">
-              {results.map((m) => (
-                <li key={m.id} className="admin-row admin-user-row">
-                  <div className="admin-row-main admin-user-main">
-                    {m.avatar_url && <img className="user-avatar admin-user-avatar" src={m.avatar_url} alt="" />}
-                    <div className="admin-user-id">
-                      <strong>{m.display_name || m.username}</strong>
-                      <span className="muted">@{m.username}</span>
+              {results.map((m) => {
+                const busy = pending.has(m.id);
+                return (
+                  <li key={m.id} className="admin-row admin-user-row">
+                    <div className="admin-row-main admin-user-main">
+                      {m.avatar_url && <img className="user-avatar admin-user-avatar" src={m.avatar_url} alt="" />}
+                      <div className="admin-user-id">
+                        <strong>{m.display_name || m.username}</strong>
+                        <span className="muted">@{m.username}</span>
+                      </div>
                     </div>
-                  </div>
-                  <button className="primary" onClick={() => promote(m)}>Promote</button>
-                </li>
-              ))}
+                    <button
+                      className="primary"
+                      onClick={() => promote(m)}
+                      disabled={busy}
+                      aria-label={`${busy ? "Promoting" : "Promote"} ${m.username}`}
+                    >
+                      {busy ? "Promoting…" : "Promote"}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
             {results.length >= SEARCH_LIMIT && (
               <p className="hint">Showing the first {SEARCH_LIMIT} — keep typing to narrow.</p>

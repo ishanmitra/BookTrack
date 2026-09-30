@@ -108,13 +108,18 @@ export default function AdminPage({ onAccountDeleted }) {
 
   // `onSettled` runs whether the action resolved or threw, so a caller that
   // disables a control for the duration of its own request always re-enables it.
+  // Resolves true/false rather than throwing, so a caller that must wait on the
+  // outcome (PromoteMember closing its search) can branch without an unhandled
+  // rejection here.
   const act = async (fn, okMsg, onSettled) => {
     try {
       await fn();
       setNotice(okMsg);
       setRefreshKey((k) => k + 1);
+      return true;
     } catch (e) {
       setNotice(e.message);
+      return false;
     } finally {
       if (onSettled) onSettled();
     }
