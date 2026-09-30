@@ -29,6 +29,8 @@ export default function AdminPage({ onAccountDeleted }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [role, setRole] = useState(null);
   const [showTransfer, setShowTransfer] = useState(false);
+  // User ids with a revoke in flight, so each row can disable only itself.
+  const [revoking, setRevoking] = useState(() => new Set());
 
   // Per-section loading flags. `loading` drives the skeleton; `loaded` records
   // that a section has resolved once, so a refresh triggered by an action keeps
@@ -104,13 +106,17 @@ export default function AdminPage({ onAccountDeleted }) {
   // render one empty frame in between.
   const usersSkeleton = roleLoading || (isSuper && !loaded.users);
 
-  const act = async (fn, okMsg) => {
+  // `onSettled` runs whether the action resolved or threw, so a caller that
+  // disables a control for the duration of its own request always re-enables it.
+  const act = async (fn, okMsg, onSettled) => {
     try {
       await fn();
       setNotice(okMsg);
       setRefreshKey((k) => k + 1);
     } catch (e) {
       setNotice(e.message);
+    } finally {
+      if (onSettled) onSettled();
     }
   };
 
@@ -120,8 +126,25 @@ export default function AdminPage({ onAccountDeleted }) {
   const reactivate = (w) =>
     act(() => api.reactivateBook(w.id), `Reactivated "${w.title}".`);
 
-  const changeRole = (u, role) =>
-    act(() => api.setUserRole(u.id, role), `${u.username} is now ${role}.`);
+  const changeRole = (u, role, onSettled) =>
+    act(() => api.setUserRole(u.id, role), `${u.username} is now ${role}.`, onSettled);
+
+  const markRevoking = (id, on) =>
+    setRevoking((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+
+  // Held until the PATCH settles, so a second tap can't fire a duplicate revoke.
+  // The server would answer it the same way, but the row would re-render twice
+  // and the user gets no signal that the first tap registered.
+  const revoke = (u) => {
+    if (revoking.has(u.id)) return;
+    markRevoking(u.id, true);
+    changeRole(u, "member", () => markRevoking(u.id, false));
+  };
 
   // Stable identity: PromoteMember keeps its debounced search effect keyed on
   // this, so a fresh arrow every render would restart the timer on every render.
@@ -206,25 +229,32 @@ export default function AdminPage({ onAccountDeleted }) {
               <p className="hint">No admins yet.</p>
             ) : (
               <ul className="admin-list">
-                {admins.map((u) => (
-                  <li key={u.id} className="admin-row admin-user-row">
-                    <div className="admin-row-main admin-user-main">
-                      {u.avatar_url && <img className="user-avatar admin-user-avatar" src={u.avatar_url} alt="" />}
-                      <div className="admin-user-id">
-                        <strong>{u.display_name || u.username}</strong>
-                        <span className="muted">@{u.username}</span>
+                {admins.map((u) => {
+                  const busy = revoking.has(u.id);
+                  return (
+                    <li key={u.id} className="admin-row admin-user-row">
+                      <div className="admin-row-main admin-user-main">
+                        {u.avatar_url && <img className="user-avatar admin-user-avatar" src={u.avatar_url} alt="" />}
+                        <div className="admin-user-id">
+                          <strong>{u.display_name || u.username}</strong>
+                          <span className="muted">@{u.username}</span>
+                        </div>
                       </div>
-                    </div>
-                    <div className="admin-row-actions">
-                      <span className="role-chip role-admin">admin</span>
-                      {u.role !== "super_admin" && (
-                        <button onClick={() => changeRole(u, "member")} aria-label={`Revoke admin from ${u.username}`}>
-                          Revoke
-                        </button>
-                      )}
-                    </div>
-                  </li>
-                ))}
+                      <div className="admin-row-actions">
+                        <span className="role-chip role-admin">admin</span>
+                        {u.role !== "super_admin" && (
+                          <button
+                            onClick={() => revoke(u)}
+                            disabled={busy}
+                            aria-label={`${busy ? "Revoking admin from" : "Revoke admin from"} ${u.username}`}
+                          >
+                            {busy ? "Revoking…" : "Revoke"}
+                          </button>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </>
