@@ -1008,8 +1008,8 @@ span.admin-tag {
 
 .session-filters { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; }
 .book-filter { position: relative; flex: 1 1 400px; max-width: 600px; min-width: 260px; }
-.book-filter-box { position: relative; display: flex; align-items: center; }
-.book-filter-input {
+.book-filter-box, .promote-box { position: relative; display: flex; align-items: center; }
+.book-filter-input, .promote-input {
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--border);
@@ -1019,9 +1019,9 @@ span.admin-tag {
   font-family: inherit;
   width: 100%;
 }
-.book-filter-input:focus { outline: none; border-color: var(--accent); }
-.book-filter-icon { position: absolute; left: 9px; color: var(--muted); pointer-events: none; }
-.book-filter-clear {
+.book-filter-input:focus, .promote-input:focus { outline: none; border-color: var(--accent); }
+.book-filter-icon, .promote-icon { position: absolute; left: 9px; color: var(--muted); pointer-events: none; }
+.book-filter-clear, .promote-clear {
   position: absolute;
   right: 5px;
   background: transparent;
@@ -1031,7 +1031,7 @@ span.admin-tag {
   padding: 2px 4px;
   cursor: pointer;
 }
-.book-filter-clear:hover { color: var(--text); }
+.book-filter-clear:hover, .promote-clear:hover { color: var(--text); }
 .book-filter-list {
   position: absolute;
   top: calc(100% + 4px);
@@ -1291,6 +1291,10 @@ a.session-log-book:hover { color: var(--accent); text-decoration: underline; }
 .admin-user-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .admin-row-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
 
+/* No align-self here: the chip sits in .admin-row-actions, a row flex container
+   that already centres its children. `flex-start` overrode that and pinned the
+   badge to the top — invisible while the super-admin row had no button beside
+   it, obvious once the Revoke button made the actions box taller than the chip. */
 .role-chip {
   font-size: 10px;
   line-height: 1;
@@ -1299,8 +1303,16 @@ a.session-log-book:hover { color: var(--accent); text-decoration: underline; }
   border-radius: 8px;
   padding: 2px 6px;
   font-weight: 600;
-  align-self: flex-start;
 }
-.role-member { background: rgba(255, 255, 255, 0.08); color: var(--muted); }
 .role-admin { background: var(--purple); color: #fff; }
-.role-super_admin { background: #2a7e6b; color: #fff; }
+
+/* Promote-a-member lookup above the admins list. The field itself reuses the
+   book filter's input styling (grouped selectors near .book-filter-input); only
+   the placement is new. */
+.promote { position: relative; margin: 0 0 12px; max-width: 420px; }
+.promote-results { margin-bottom: 10px; }
+.promote .hint { margin: 8px 0 0; }
+
+/* Stands in for the promote field while the section is loading, so the search
+   box landing doesn't shift the list below it. Mirrors .promote-input. */
+.skeleton-control { height: 38px; width: 420px; max-width: 100%; border-radius: 6px; margin: 0 0 12px; }

@@ -346,14 +346,29 @@ app.delete("/api/books/:id/commits", requireAuth, h(async (req, res) => {
 }));
 
 // ── role management (super admin only) ───────────────────────────────────────
+// Ceiling on the number of name-search hits the server will return, so a search
+// is always bounded no matter what the client asks for.
+const USER_SEARCH_MAX = 100;
+
 app.get("/api/admin/role", requireAdmin, (req, res) => {
   // The signed-in admin's own role, so the admin console can branch super-only
   // features. /api/auth/me and public profiles stay boolean-only per contract.
   res.json({ role: req.user.role });
 });
 
-app.get("/api/admin/users", requireSuperAdmin, h(async (_req, res) => {
-  res.json(await db.listUsers());
+// `role=privileged` is the console's default list (admins only — a member-heavy
+// table would otherwise ship in full on every load) and `role=member&q=…` backs
+// the promote search. Omitting `role` keeps the unfiltered listing. `limit` only
+// ever applies to a search, so the admin roster comes back whole.
+app.get("/api/admin/users", requireSuperAdmin, h(async (req, res) => {
+  const role = req.query?.role;
+  if (role != null && role !== "" && role !== "privileged" && role !== "member") {
+    return res.status(400).json({ error: "role must be 'privileged' or 'member'" });
+  }
+  const q = typeof req.query?.q === "string" ? req.query.q.trim().slice(0, 100) : "";
+  const asked = Number.parseInt(req.query?.limit, 10);
+  const limit = Number.isInteger(asked) && asked > 0 ? Math.min(asked, USER_SEARCH_MAX) : undefined;
+  res.json(await db.listUsers({ role: role || undefined, q: q || undefined, limit }));
 }));
 
 app.patch("/api/admin/users/:id/role", requireSuperAdmin, h(async (req, res) => {

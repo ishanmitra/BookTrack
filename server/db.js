@@ -716,11 +716,41 @@ export async function getOrCreateGithubUser({ githubId, displayName, avatarUrl, 
   return get("SELECT * FROM users WHERE id = ?", info.lastInsertRowid);
 }
 
-export async function listUsers() {
+// A LIKE needle is matched literally: without this a search for "100%" (or any
+// other user-typed wildcard) would silently widen to the whole table and undo
+// the row cap the console relies on.
+function escapeLike(s) {
+  return s.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+// The role console shows the privileged set and searches members by name to
+// promote them, so the filtering happens here rather than in the client: with a
+// few hundred accounts, shipping every user row is both a fat payload and the
+// list flood this replaces. `role: "privileged"` is admin-or-super_admin,
+// `role: "member"` is the promote search's pool, and `q` matches username or
+// display name. `limit` caps a *search* only — the admin roster is always
+// returned whole, so a caller can't silently truncate it.
+export async function listUsers({ role, q, limit } = {}) {
+  const where = [];
+  const params = [];
+  if (role === "privileged") where.push("u.role IN ('admin', 'super_admin')");
+  else if (role === "member") where.push("u.role = 'member'");
+  const needle = typeof q === "string" ? q.trim() : "";
+  if (needle) {
+    where.push("(u.username LIKE ? ESCAPE '\\' OR u.display_name LIKE ? ESCAPE '\\')");
+    const like = `%${escapeLike(needle)}%`;
+    params.push(like, like);
+  }
+  const cap = needle && Number.isInteger(limit) && limit > 0 ? limit : 0;
+  if (cap) params.push(cap);
   return all(
     `SELECT u.id, u.display_name, u.username, u.avatar_url, u.role, u.created_at,
             (SELECT COUNT(*) FROM commits c WHERE c.user_id = u.id) AS commit_count
-     FROM users u ORDER BY u.role = 'super_admin' DESC, u.created_at ASC`
+     FROM users u
+     ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+     ORDER BY u.role = 'super_admin' DESC, u.created_at ASC
+     ${cap ? "LIMIT ?" : ""}`,
+    params
   );
 }
 

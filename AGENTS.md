@@ -236,7 +236,7 @@ From the flat model to the hierarchy + roles, as one transaction on startup:
 - `GET /api/auth/github/callback` — exchange code → upsert `users` by `github_id` → set httpOnly `bt_session` cookie → redirect
 - `GET /api/auth/me` → `{user: {id, display_name, username, avatar_url, is_admin, created_at} | null}` — `is_admin = role !== 'member'`; the raw role is never exposed here (or publicly). Shape comes from `publicUser()`, which also feeds the inlined session block. `Cache-Control: no-store` + `Vary: Cookie` (per-user). Normally the client never calls this at all: the server already inlined the session into the shell (see gotchas), so it is only the dev/fallback path.
 - `GET /api/admin/role` — admin-only; `{role: 'super_admin' | 'admin'}` so the admin console can branch super-only features
-- `GET /api/admin/users` — super-admin-only; all users with their role
+- `GET /api/admin/users` — super-admin-only; users with their role, filtered. Query params: `role` (`privileged` = `admin` **or** `super_admin`, `member` = the promote-search pool; omitted = everyone), `q` (case-insensitive substring on `username` OR `display_name`, `LIKE` metacharacters escaped so a typed `%` can't widen the match), and `limit` (clamped to `USER_SEARCH_MAX = 100`). **`limit` applies to a `q` search only** — the privileged roster is always returned whole, so no caller can silently truncate it. An unrecognised `role` is a 400.
 - `PATCH /api/admin/users/:id/role` `{role: 'admin' | 'member'}` — super-admin-only; refuses to touch the `super_admin` row
 - `POST /api/admin/transfer` `{userId}` — super-admin-only; successor → `super_admin`, incumbent → `admin` (single transaction, demotes first to respect the partial unique index)
 - `DELETE /api/me` — deletes the signed-in account + its commits; **refused (400) for the super admin** until authority is transferred
@@ -627,10 +627,37 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
   read. Role checks re-read the live row from the DB each request, so transfer /
   demote take effect immediately even on cached sessions. Client:
   `AdminPage.jsx` (`/admin` — pending review with Bind, retired list with
-  Reactivate, super-only Users table with role select + Transfer, self
+  Reactivate, super-only Roles panel (admins roster + promote search), self
   account deletion), pending-review badge on library items / book info /
   wizard and in saved meta, admin nav link, and `api.js` now throws errors with
   their HTTP status.
+- **Roles panel lists only admins; promotion moved to a search** (the list used
+  to render *every* user). `GET /api/admin/users` is unfiltered and un-paginated,
+  so at a few hundred accounts both the payload and the list were flooded with
+  plain members whose only purpose there was to be promotable. Now:
+  - The roster is `?role=privileged` (`admin` or `super_admin`), fetched
+    server-side, so its size is the number of admins rather than the size of the
+    user table. Every row's action collapsed from a two-way `<select>` to a
+    one-way **Revoke**, and the `role-chip` ternary became a constant `admin`
+    badge (which is also what keeps the super admin rendering identically to an
+    admin — see the Display rule). `.role-member` / `.role-super_admin` are now
+    dead and gone.
+  - Promotion is `PromoteMember.jsx`: a name search against
+    `?role=member&q=…`, capped at 20 hits, 2-char minimum, 200 ms debounce.
+    Each match is a row with an explicit **Promote** button rather than
+    Enter-to-commit on a highlighted result — it's a privileged action, so the
+    user should read the row they are elevating. Clearing the query after a
+    successful promote keeps the promoted user from lingering as a stale
+    candidate while `refreshKey` refetches the roster.
+  - The cap lives in `db.listUsers`, not the route, and only applies when `q` is
+    set — the roster is returned whole, so a future caller can't silently
+    truncate it. `LIKE` needles are escaped, otherwise a search for `100%` would
+    widen to the whole table and undo the cap.
+  - The search field reuses the profile book filter's input styling via grouped
+    selectors (`.book-filter-input, .promote-input`); only placement is new.
+    `SkeletonList` is joined by a `.skeleton-control` bar sized to the field, so
+    the box landing doesn't shift the roster below it — the same
+    footprint-matching rule the other sections follow.
 - **Admin console loads per section** (issue #2): `/admin` used to mount nothing
   until one `Promise.all` resolved, so Catalog review and Retired catalog
   appeared all at once and pushed the rest of the page down. Every section now

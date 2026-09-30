@@ -48,7 +48,14 @@ const api = {
   adminRole: () => request("/api/admin/role"),
   bindBook: (fingerprintId, patch = {}) => request(`/api/books/bind/${fingerprintId}`, { method: "POST", body: JSON.stringify(patch) }),
   reactivateBook: (id) => request(`/api/books/reactivate/${id}`, { method: "POST" }),
-  adminUsers: () => request("/api/admin/users"),
+  adminUsers: (params = {}) => {
+    const qs = new URLSearchParams();
+    if (params.role) qs.set("role", params.role);
+    if (params.q) qs.set("q", params.q);
+    if (params.limit) qs.set("limit", String(params.limit));
+    const query = qs.toString();
+    return request(`/api/admin/users${query ? `?${query}` : ""}`);
+  },
   setUserRole: (id, role) => request(`/api/admin/users/${id}/role`, { method: "PATCH", body: JSON.stringify({ role }) }),
   transferSuperAdmin: (userId) => request("/api/admin/transfer", { method: "POST", body: JSON.stringify({ userId }) }),
   deleteMe: () => request("/api/me", { method: "DELETE" }),
