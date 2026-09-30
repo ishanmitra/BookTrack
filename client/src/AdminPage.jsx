@@ -106,12 +106,10 @@ export default function AdminPage({ onAccountDeleted }) {
   // render one empty frame in between.
   const usersSkeleton = roleLoading || (isSuper && !loaded.users);
 
-  // `onSettled` runs whether the action resolved or threw, so a caller that
-  // disables a control for the duration of its own request always re-enables it.
   // Resolves true/false rather than throwing, so a caller that must wait on the
-  // outcome (PromoteMember closing its search) can branch without an unhandled
-  // rejection here.
-  const act = async (fn, okMsg, onSettled) => {
+  // outcome (revoke and PromoteMember both branch on it) can do so without
+  // leaving an unhandled rejection behind.
+  const act = async (fn, okMsg) => {
     try {
       await fn();
       setNotice(okMsg);
@@ -120,8 +118,6 @@ export default function AdminPage({ onAccountDeleted }) {
     } catch (e) {
       setNotice(e.message);
       return false;
-    } finally {
-      if (onSettled) onSettled();
     }
   };
 
@@ -131,8 +127,8 @@ export default function AdminPage({ onAccountDeleted }) {
   const reactivate = (w) =>
     act(() => api.reactivateBook(w.id), `Reactivated "${w.title}".`);
 
-  const changeRole = (u, role, onSettled) =>
-    act(() => api.setUserRole(u.id, role), `${u.username} is now ${role}.`, onSettled);
+  const changeRole = (u, role) =>
+    act(() => api.setUserRole(u.id, role), `${u.username} is now ${role}.`);
 
   const markRevoking = (id, on) =>
     setRevoking((prev) => {
@@ -145,10 +141,16 @@ export default function AdminPage({ onAccountDeleted }) {
   // Held until the PATCH settles, so a second tap can't fire a duplicate revoke.
   // The server would answer it the same way, but the row would re-render twice
   // and the user gets no signal that the first tap registered.
-  const revoke = (u) => {
+  const revoke = async (u) => {
     if (revoking.has(u.id)) return;
     markRevoking(u.id, true);
-    changeRole(u, "member", () => markRevoking(u.id, false));
+    const ok = await changeRole(u, "member");
+    // Deliberately not cleared on success: the roster refetch that
+    // `setRefreshKey` triggers is a separate round-trip, so clearing here would
+    // render one frame with the button re-enabled while the revoked admin is
+    // still in the stale list — an active "Revoke" on an already-revoked row.
+    // The button leaves with the row instead. Only a failure brings it back.
+    if (!ok) markRevoking(u.id, false);
   };
 
   // Stable identity: PromoteMember keeps its debounced search effect keyed on
