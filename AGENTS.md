@@ -189,6 +189,7 @@ Permissions matrix:
 | Create/edit works & editions, merge/unmerge | ❌ | ✅ | ✅ |
 | Retire / reactivate / hard-delete zero-commit | ❌ | ✅ | ✅ |
 | Rename slugs (free-for-reuse) | ❌ | ✅ | ✅ |
+| View the admin roster | ❌ | ✅ | ✅ |
 | Assign/revoke admin | ❌ | ❌ | ✅ |
 | Transfer super admin | ❌ | ❌ | ✅ (incumbent) |
 | Server config, env, deploy | ❌ | ❌ | ✅ |
@@ -236,6 +237,7 @@ From the flat model to the hierarchy + roles, as one transaction on startup:
 - `GET /api/auth/github/callback` — exchange code → upsert `users` by `github_id` → set httpOnly `bt_session` cookie → redirect
 - `GET /api/auth/me` → `{user: {id, display_name, username, avatar_url, is_admin, created_at} | null}` — `is_admin = role !== 'member'`; the raw role is never exposed here (or publicly). Shape comes from `publicUser()`, which also feeds the inlined session block. `Cache-Control: no-store` + `Vary: Cookie` (per-user). Normally the client never calls this at all: the server already inlined the session into the shell (see gotchas), so it is only the dev/fallback path.
 - `GET /api/admin/role` — admin-only; `{role: 'super_admin' | 'admin'}` so the admin console can branch super-only features
+- `GET /api/admin/admins` — admin-only (every tier); the privileged roster, so the Roles panel can render a read-only list for ordinary admins. No query params at all, so it can't be widened into a member directory.
 - `GET /api/admin/users` — super-admin-only; users with their role, filtered. Query params: `role` (`privileged` = `admin` **or** `super_admin`, `member` = the promote-search pool; omitted = everyone), `q` (case-insensitive substring on `username` OR `display_name`, `LIKE` metacharacters escaped so a typed `%` can't widen the match), and `limit` (clamped to `USER_SEARCH_MAX = 100`). **`limit` applies to a `q` search only** — the privileged roster is always returned whole, so no caller can silently truncate it. An unrecognised `role` is a 400.
 - `PATCH /api/admin/users/:id/role` `{role: 'admin' | 'member'}` — super-admin-only; refuses to touch the `super_admin` row
 - `POST /api/admin/transfer` `{userId}` — super-admin-only; successor → `super_admin`, incumbent → `admin` (single transaction, demotes first to respect the partial unique index)
@@ -670,17 +672,28 @@ suite; verify UI in a Chromium browser (Brave/Chrome). Server smoke test:
   before it swaps to the ownership controls. A `loaded` map records the rows
   already on screen, so a refresh after Bind/Reactivate keeps the existing rows
   instead of re-skeletonising.
-- **Roles panel renders from first paint too** (issue #2): it was gated on
-  `isSuper`, so it materialised a round-trip after mount and pushed the Account
-  zone down. It now renders immediately alongside the catalog sections and holds
-  row-shaped placeholders until the role is known and the user list has landed;
-  an ordinary admin sees a one-line note instead, so the footprint is the same
-  for everyone and no half-rendered table is ever shown. The user list still
-  can't join the parallel batch: `GET /api/admin/users` is super-admin-only, so
-  requesting it speculatively would fire a guaranteed 403 on every load for
-  ordinary admins. The placeholder is keyed off `loaded` rather than the loading
-  flag, because the role resolves a round-trip before that request is
-  dispatched — the flag would otherwise render one empty frame in between.
+- **The Roles panel's roster is read-only for ordinary admins** (it used to
+  render nothing but a one-line note for them). An admin who can't act on roles
+  still needs to know *who else* curates the catalog, so the list — super admin
+  included — now renders for every admin, and the note survives as a footnote
+  under it ("Role management is restricted to the account owner."). Only the
+  super-admin affordances stay tiered: `PromoteMember` renders behind
+  `isSuper`, and each row's **Revoke** is `isSuper && u.role !== "super_admin"`,
+  so an ordinary admin's rows are pure identity. **Mutations did not move** —
+  `PATCH /api/admin/users/:id/role` and `POST /api/admin/transfer` are still
+  super-only; this is a read.
+  - It reads a **new `GET /api/admin/admins`**, admin-only, rather than
+    loosening `GET /api/admin/users`. That endpoint has no query params *by
+    design*: it takes no `role`/`q`/`limit`, so an admin using it can't widen it
+    into the member table the way `?role=member` would. The disclosure is
+    already public anyway — the admin badge rides along on every profile from
+    `GET /api/users/:username`, signed in or out.
+  - Because the roster is no longer role-gated it **joins the parallel mount
+    batch** and the super admin loses the round-trip they used to pay for it.
+    The skeleton still waits on `roleLoading` *as well as* the roster, because
+    the role decides what sits **above** the rows (the promote control) — a
+    roster landing first would push a super admin's promote control in from
+    below.
 - **No signed-out flash on first load** (issue #1): the shell inlines the
   resolved session as a `<script type="application/json" id="bt-session">` data
   block, read by `client/src/boot.js` at module load, so `App` initialises

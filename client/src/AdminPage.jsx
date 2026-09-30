@@ -10,8 +10,8 @@ function fmtTime(iso) {
   return d.toLocaleString();
 }
 
-// The admins list is fetched as the privileged set only. Plain members are
-// reached through PromoteMember's search instead of sitting in this list, so the
+// The admins list holds the privileged set only. Plain members are reached
+// through PromoteMember's search instead of sitting in this list, so the
 // panel stays short no matter how many accounts exist.
 function sortAdmins(list) {
   return [...list].sort((a, b) => {
@@ -78,16 +78,14 @@ export default function AdminPage({ onAccountDeleted }) {
     return () => { alive = false; };
   }, [refreshKey]);
 
-  // Super-admin only, so unlike the catalog sections it can't join the batch
-  // above — GET /api/admin/users is 403 for everyone else, and firing it
-  // speculatively would mean a guaranteed failing request on every load for
-  // ordinary admins. Gating on the role costs the super admin one round-trip.
+  // The admin roster. Every admin can read it, so unlike the role probe this no
+  // longer waits on `role` and joins the parallel batch on mount — an ordinary
+  // admin sees the list, just without the role actions on it.
   useEffect(() => {
-    if (role !== "super_admin") return;
     let alive = true;
     setUsersLoading(true);
     api
-      .adminUsers({ role: "privileged" })
+      .adminAdmins()
       .then((u) => { if (alive) setAdmins(sortAdmins(u)); })
       .catch((e) => { if (alive) setNotice(e.message); })
       .then(() => {
@@ -96,7 +94,7 @@ export default function AdminPage({ onAccountDeleted }) {
         setLoaded((l) => ({ ...l, users: true }));
       });
     return () => { alive = false; };
-  }, [role, refreshKey]);
+  }, [refreshKey]);
 
   // A pending flag only means something while its row is on screen, so drop
   // entries for users the roster no longer lists. A successful revoke leaves
@@ -117,11 +115,10 @@ export default function AdminPage({ onAccountDeleted }) {
 
   const isSuper = role === "super_admin";
   // The Roles panel is on screen from first paint, so hold its rows until the
-  // role is known and (for a super admin) the user list has landed. `loaded`
-  // rather than `usersLoading`, because the role resolves a round-trip before
-  // the user request is even dispatched — keying off the loading flag would
-  // render one empty frame in between.
-  const usersSkeleton = roleLoading || (isSuper && !loaded.users);
+  // roster has landed — and until the role is known too, because that decides
+  // what sits *above* the rows (the promote search). Landing the roster first
+  // would then push a super admin's promote control in from below.
+  const usersSkeleton = roleLoading || skeleton("users", usersLoading);
 
   // Resolves true/false rather than throwing, so a caller that must wait on the
   // outcome (revoke and PromoteMember both branch on it) can do so without
@@ -247,9 +244,9 @@ export default function AdminPage({ onAccountDeleted }) {
             <Skeleton className="skeleton-control" />
             <SkeletonList rows={3} avatar />
           </>
-        ) : isSuper ? (
+        ) : (
           <>
-            <PromoteMember onPromote={(m) => changeRole(m, "admin")} onError={showError} />
+            {isSuper && <PromoteMember onPromote={(m) => changeRole(m, "admin")} onError={showError} />}
             {admins.length === 0 ? (
               <p className="hint">No admins yet.</p>
             ) : (
@@ -267,7 +264,7 @@ export default function AdminPage({ onAccountDeleted }) {
                       </div>
                       <div className="admin-row-actions">
                         <span className="role-chip role-admin">admin</span>
-                        {u.role !== "super_admin" && (
+                        {isSuper && u.role !== "super_admin" && (
                           <button
                             onClick={() => revoke(u)}
                             disabled={busy}
@@ -282,9 +279,12 @@ export default function AdminPage({ onAccountDeleted }) {
                 })}
               </ul>
             )}
+            {/* Everyone can read the roster, so this is now a footnote about who
+                can *act* on it — the section no longer differs by role tier. */}
+            {!isSuper && (
+              <p className="hint">Role management is restricted to the account owner.</p>
+            )}
           </>
-        ) : (
-          <p className="hint">Role management is restricted to the account owner.</p>
         )}
         </GrowBox>
       </section>

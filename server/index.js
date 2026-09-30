@@ -356,6 +356,15 @@ app.get("/api/admin/role", requireAdmin, (req, res) => {
   res.json({ role: req.user.role });
 });
 
+// The admin roster, readable by any admin rather than super-admins only: an
+// ordinary admin takes no role actions, but should still see who else curates
+// the catalog. Not a new disclosure — the admin badge already rides along on
+// every public profile. Deliberately takes no query params, so unlike the
+// endpoint below there is nothing here to widen and no way to enumerate members.
+app.get("/api/admin/admins", requireAdmin, h(async (req, res) => {
+  res.json(await db.listUsers({ role: "privileged" }));
+}));
+
 // `role=privileged` is the console's default list (admins only — a member-heavy
 // table would otherwise ship in full on every load) and `role=member&q=…` backs
 // the promote search. Omitting `role` keeps the unfiltered listing. `limit` only

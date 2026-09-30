@@ -46,6 +46,7 @@ const api = {
   pendingBooks: () => request("/api/books/pending"),
   retiredBooks: () => request("/api/books/retired"),
   adminRole: () => request("/api/admin/role"),
+  adminAdmins: () => request("/api/admin/admins"),
   bindBook: (fingerprintId, patch = {}) => request(`/api/books/bind/${fingerprintId}`, { method: "POST", body: JSON.stringify(patch) }),
   reactivateBook: (id) => request(`/api/books/reactivate/${id}`, { method: "POST" }),
   adminUsers: (params = {}) => {
